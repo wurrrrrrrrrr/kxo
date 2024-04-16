@@ -17,6 +17,16 @@ typedef struct {
     int i_lower_bound, j_lower_bound, i_upper_bound, j_upper_bound;
 } line_t;
 
+/* Self-defined fixed-point type, using last 10 bits as fractional bits,
+ * starting from lsb */
+#define FIXED_SCALE_BITS 8
+#define FIXED_MAX (~0U)
+#define FIXED_MIN (0U)
+#define GET_SIGN(x) ((x) & (1U << 31))
+#define SET_SIGN(x) ((x) | (1U << 31))
+#define CLR_SIGN(x) ((x) & ((1U << 31) - 1U))
+typedef unsigned fixed_point_t;
+
 #define DRAW_SIZE (N_GRIDS + BOARD_SIZE)
 #define DRAWBUFFER_SIZE                                                 \
     ((BOARD_SIZE * (BOARD_SIZE + 1) << 1) + (BOARD_SIZE * BOARD_SIZE) + \
@@ -24,4 +34,6 @@ typedef struct {
 
 extern const line_t lines[4];
 
-// void draw_board(const char *t);
+int *available_moves(const char *table);
+char check_win(char *t);
+fixed_point_t calculate_win_value(char win, char player);

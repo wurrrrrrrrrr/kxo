@@ -31,7 +31,6 @@ MODULE_DESCRIPTION("A device that simulates interrupts");
 static int delay = 100; /* time (in ms) to generate an event */
 
 /* Data produced by the simulated device */
-static int simrupt_data;
 
 /* Timer to simulate a periodic IRQ */
 static struct timer_list timer;
@@ -126,6 +125,8 @@ static struct circ_buf fast_buf;
 //     return ret;
 // }
 
+static char table[N_GRIDS];
+
 /* Draw the board into draw_buffer */
 static int draw_board(char *table)
 {
@@ -201,6 +202,10 @@ static void simrupt_work_func(struct work_struct *w)
     pr_info("simrupt: [CPU#%d] %s\n", cpu, __func__);
     put_cpu();
 
+    mutex_lock(&producer_lock);
+    draw_board(table);
+    mutex_unlock(&producer_lock);
+
     /* Store data to the kfifo buffer */
     // mutex_lock(&producer_lock);
     mutex_lock(&consumer_lock);
@@ -211,6 +216,52 @@ static void simrupt_work_func(struct work_struct *w)
     wake_up_interruptible(&rx_wait);
 }
 
+static char turn = 'O';
+
+static void ai_one_work_func(struct work_struct *w)
+{
+    int cpu;
+
+    WARN_ON_ONCE(in_softirq());
+    WARN_ON_ONCE(in_interrupt());
+
+    cpu = get_cpu();
+    pr_info("simrupt: [CPU#%d] %s\n", cpu, __func__);
+    put_cpu();
+
+    if (turn == 'O') {
+        int move;
+        WRITE_ONCE(move, mcts(table, 'O'));
+        if (move != -1)
+            WRITE_ONCE(table[move], 'O');
+    }
+
+    turn = 'X';
+    smp_mb();
+}
+
+static void ai_two_work_func(struct work_struct *w)
+{
+    int cpu;
+
+    WARN_ON_ONCE(in_softirq());
+    WARN_ON_ONCE(in_interrupt());
+
+    cpu = get_cpu();
+    pr_info("simrupt: [CPU#%d] %s\n", cpu, __func__);
+    put_cpu();
+
+    if (turn == 'X') {
+        int move;
+        WRITE_ONCE(move, mcts(table, 'X'));
+        if (move != -1)
+            WRITE_ONCE(table[move], 'X');
+    }
+
+    turn = 'O';
+    smp_mb();
+}
+
 /* Workqueue for asynchronous bottom-half processing */
 static struct workqueue_struct *simrupt_workqueue;
 
@@ -218,6 +269,8 @@ static struct workqueue_struct *simrupt_workqueue;
  * asynchronously.
  */
 static DECLARE_WORK(work, simrupt_work_func);
+static DECLARE_WORK(ai_one_work, ai_one_work_func);
+static DECLARE_WORK(ai_two_work, ai_two_work_func);
 
 /* Tasklet handler.
  *
@@ -243,8 +296,28 @@ static void simrupt_tasklet_func(unsigned long __data)
             __func__, (unsigned long long) nsecs >> 10);
 }
 
+static void ai_game_tasklet_func(unsigned long __data)
+{
+    ktime_t tv_start, tv_end;
+    s64 nsecs;
+
+    WARN_ON_ONCE(!in_interrupt());
+    WARN_ON_ONCE(!in_softirq());
+
+    tv_start = ktime_get();
+    queue_work(simrupt_workqueue, &ai_one_work);
+    queue_work(simrupt_workqueue, &ai_two_work);
+    tv_end = ktime_get();
+
+    nsecs = (s64) ktime_to_ns(ktime_sub(tv_end, tv_start));
+
+    pr_info("simrupt: [CPU#%d] %s in_softirq: %llu usec\n", smp_processor_id(),
+            __func__, (unsigned long long) nsecs >> 10);
+}
+
 /* Tasklet for asynchronous bottom-half processing in softirq context */
 static DECLARE_TASKLET_OLD(simrupt_tasklet, simrupt_tasklet_func);
+static DECLARE_TASKLET_OLD(ai_game_tasklet, ai_game_tasklet_func);
 
 // static void process_data(void)
 // {
@@ -264,46 +337,9 @@ static void ai_game(void)
     WARN_ON_ONCE(!irqs_disabled());
 
     pr_info("simrupt: [CPU#%d] doing AI game\n", smp_processor_id());
-
-    char table[N_GRIDS];
-    memset(table, ' ', N_GRIDS);
-    char ai1 = 'X', ai2 = 'O', turn = 'X';
-
-    while (1) {
-        mutex_lock(&producer_lock);
-        char win = check_win(table);
-        mutex_unlock(&producer_lock);
-        if (win != ' ')
-            break;
-
-        if (turn == ai1) {
-            mutex_lock(&producer_lock);
-            int move = mcts(table, ai1);
-            mutex_unlock(&producer_lock);
-
-            if (move != -1) {
-                WRITE_ONCE(table[move], ai1);
-            }
-        } else {
-            mutex_lock(&producer_lock);
-            int move = mcts(table, ai2);
-            mutex_unlock(&producer_lock);
-
-            if (move != -1) {
-                WRITE_ONCE(table[move], ai2);
-            }
-        }
-
-        turn = turn == 'X' ? 'O' : 'X';
-        smp_wmb();
-
-        mutex_lock(&producer_lock);
-        draw_board(table);
-        mutex_unlock(&producer_lock);
-
-        pr_info("simrupt: [CPU#%d] scheduling tasklet\n", smp_processor_id());
-        tasklet_schedule(&simrupt_tasklet);
-    }
+    pr_info("simrupt: [CPU#%d] scheduling tasklet\n", smp_processor_id());
+    tasklet_schedule(&simrupt_tasklet);
+    tasklet_schedule(&ai_game_tasklet);
 }
 
 static void timer_handler(struct timer_list *__timer)
@@ -321,7 +357,15 @@ static void timer_handler(struct timer_list *__timer)
     local_irq_disable();
 
     tv_start = ktime_get();
-    ai_game();
+    mutex_lock(&producer_lock);
+    char win = check_win(table);
+    mutex_unlock(&producer_lock);
+    if (win == ' ')
+        ai_game();
+    else {
+        tasklet_schedule(&simrupt_tasklet);
+        pr_info("simrupt: %c win!!!\n", win);
+    }
     // process_data();
     tv_end = ktime_get();
 
@@ -459,6 +503,7 @@ static int __init simrupt_init(void)
         goto error_cdev;
     }
 
+    memset(table, ' ', N_GRIDS);
     /* Setup the timer */
     timer_setup(&timer, timer_handler, 0);
     atomic_set(&open_cnt, 0);

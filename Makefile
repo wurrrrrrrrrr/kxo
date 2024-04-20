@@ -1,5 +1,5 @@
 TARGET = kmldrv
-kmldrv-objs = simrupt.o game.o mcts.o
+kmldrv-objs = simrupt.o game.o wyhash.o mcts.o negamax.o zobrist.o
 obj-m := $(TARGET).o
 
 KDIR ?= /lib/modules/$(shell uname -r)/build

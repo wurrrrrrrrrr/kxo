@@ -12,6 +12,7 @@
 
 #include "game.h"
 #include "mcts.h"
+#include "negamax.h"
 
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("National Cheng Kung University, Taiwan");
@@ -147,7 +148,7 @@ static void simrupt_work_func(struct work_struct *w)
     wake_up_interruptible(&rx_wait);
 }
 
-static atomic_t turn;
+static char turn;
 
 static void ai_one_work_func(struct work_struct *w)
 {
@@ -159,23 +160,23 @@ static void ai_one_work_func(struct work_struct *w)
     WARN_ON_ONCE(in_softirq());
     WARN_ON_ONCE(in_interrupt());
 
-    int expect = 0;
-    atomic_read_acquire(&turn);
-    if (!atomic_try_cmpxchg(&turn, &expect, 1))
+    READ_ONCE(turn);
+    if (turn == 'X')
         return;
 
     cpu = get_cpu();
     pr_info("simrupt: [CPU#%d] start doing %s\n", cpu, __func__);
     tv_start = ktime_get();
     mutex_lock(&producer_lock);
-    int move = mcts(table, 'O');
+    int move;
+    WRITE_ONCE(move, mcts(table, 'O'));
 
     smp_mb();
 
     if (move != -1)
         WRITE_ONCE(table[move], 'O');
 
-    atomic_set_release(&turn, 1);
+    WRITE_ONCE(turn, 'X');
     mutex_unlock(&producer_lock);
     tv_end = ktime_get();
 
@@ -195,23 +196,23 @@ static void ai_two_work_func(struct work_struct *w)
     WARN_ON_ONCE(in_softirq());
     WARN_ON_ONCE(in_interrupt());
 
-    int expect = 1;
-    atomic_read_acquire(&turn);
-    if (!atomic_try_cmpxchg(&turn, &expect, 0))
+    READ_ONCE(turn);
+    if (turn == 'O')
         return;
 
     cpu = get_cpu();
     pr_info("simrupt: [CPU#%d] start doing %s\n", cpu, __func__);
     tv_start = ktime_get();
     mutex_lock(&producer_lock);
-    int move = mcts(table, 'X');
+    int move;
+    WRITE_ONCE(move, negamax_predict(table, 'X').move);
 
     smp_mb();
 
     if (move != -1)
         WRITE_ONCE(table[move], 'X');
 
-    atomic_set_release(&turn, 0);
+    WRITE_ONCE(turn, 'O');
     mutex_unlock(&producer_lock);
     tv_end = ktime_get();
 
@@ -443,8 +444,9 @@ static int __init simrupt_init(void)
         goto error_cdev;
     }
 
+    negamax_init();
     memset(table, ' ', N_GRIDS);
-    atomic_set_release(&turn, 0);
+    turn = 'O';
     /* Setup the timer */
     timer_setup(&timer, timer_handler, 0);
     atomic_set(&open_cnt, 0);

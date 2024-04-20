@@ -149,6 +149,7 @@ static void simrupt_work_func(struct work_struct *w)
 }
 
 static char turn;
+static int finish;
 
 static void ai_one_work_func(struct work_struct *w)
 {
@@ -159,11 +160,6 @@ static void ai_one_work_func(struct work_struct *w)
 
     WARN_ON_ONCE(in_softirq());
     WARN_ON_ONCE(in_interrupt());
-
-    READ_ONCE(turn);
-    smp_rmb();
-    if (turn == 'X')
-        return;
 
     cpu = get_cpu();
     pr_info("simrupt: [CPU#%d] start doing %s\n", cpu, __func__);
@@ -178,6 +174,7 @@ static void ai_one_work_func(struct work_struct *w)
         WRITE_ONCE(table[move], 'O');
 
     WRITE_ONCE(turn, 'X');
+    WRITE_ONCE(finish, 1);
     smp_wmb();
     mutex_unlock(&producer_lock);
     tv_end = ktime_get();
@@ -198,11 +195,6 @@ static void ai_two_work_func(struct work_struct *w)
     WARN_ON_ONCE(in_softirq());
     WARN_ON_ONCE(in_interrupt());
 
-    READ_ONCE(turn);
-    smp_rmb();
-    if (turn == 'O')
-        return;
-
     cpu = get_cpu();
     pr_info("simrupt: [CPU#%d] start doing %s\n", cpu, __func__);
     tv_start = ktime_get();
@@ -216,6 +208,7 @@ static void ai_two_work_func(struct work_struct *w)
         WRITE_ONCE(table[move], 'X');
 
     WRITE_ONCE(turn, 'O');
+    WRITE_ONCE(finish, 1);
     smp_wmb();
     mutex_unlock(&producer_lock);
     tv_end = ktime_get();
@@ -251,8 +244,20 @@ static void simrupt_tasklet_func(unsigned long __data)
     WARN_ON_ONCE(!in_softirq());
 
     tv_start = ktime_get();
-    queue_work(simrupt_workqueue, &ai_one_work);
-    queue_work(simrupt_workqueue, &ai_two_work);
+
+    READ_ONCE(finish);
+    READ_ONCE(turn);
+    smp_rmb();
+
+    if (finish && turn == 'O') {
+        WRITE_ONCE(finish, 0);
+        smp_wmb();
+        queue_work(simrupt_workqueue, &ai_one_work);
+    } else if (finish && turn == 'X') {
+        WRITE_ONCE(finish, 0);
+        smp_wmb();
+        queue_work(simrupt_workqueue, &ai_two_work);
+    }
     queue_work(simrupt_workqueue, &work);
     tv_end = ktime_get();
 
@@ -451,6 +456,7 @@ static int __init simrupt_init(void)
     negamax_init();
     memset(table, ' ', N_GRIDS);
     turn = 'O';
+    finish = 1;
     /* Setup the timer */
     timer_setup(&timer, timer_handler, 0);
     atomic_set(&open_cnt, 0);

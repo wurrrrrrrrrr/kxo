@@ -161,6 +161,7 @@ static void ai_one_work_func(struct work_struct *w)
     WARN_ON_ONCE(in_interrupt());
 
     READ_ONCE(turn);
+    smp_rmb();
     if (turn == 'X')
         return;
 
@@ -177,6 +178,7 @@ static void ai_one_work_func(struct work_struct *w)
         WRITE_ONCE(table[move], 'O');
 
     WRITE_ONCE(turn, 'X');
+    smp_wmb();
     mutex_unlock(&producer_lock);
     tv_end = ktime_get();
 
@@ -197,6 +199,7 @@ static void ai_two_work_func(struct work_struct *w)
     WARN_ON_ONCE(in_interrupt());
 
     READ_ONCE(turn);
+    smp_rmb();
     if (turn == 'O')
         return;
 
@@ -213,6 +216,7 @@ static void ai_two_work_func(struct work_struct *w)
         WRITE_ONCE(table[move], 'X');
 
     WRITE_ONCE(turn, 'O');
+    smp_wmb();
     mutex_unlock(&producer_lock);
     tv_end = ktime_get();
 

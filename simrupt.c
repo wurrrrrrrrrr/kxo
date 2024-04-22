@@ -118,7 +118,7 @@ static void fast_buf_clear(void)
 }
 
 /* Workqueue handler: executed by a kernel thread */
-static void simrupt_work_func(struct work_struct *w)
+static void drawboard_work_func(struct work_struct *w)
 {
     int cpu;
 
@@ -226,7 +226,7 @@ static struct workqueue_struct *kmldrv_workqueue;
 /* Work item: holds a pointer to the function that is going to be executed
  * asynchronously.
  */
-static DECLARE_WORK(work, simrupt_work_func);
+static DECLARE_WORK(drawboard_work, drawboard_work_func);
 static DECLARE_WORK(ai_one_work, ai_one_work_func);
 static DECLARE_WORK(ai_two_work, ai_two_work_func);
 
@@ -236,7 +236,7 @@ static DECLARE_WORK(ai_two_work, ai_two_work_func);
  * two of the same type of tasklet cannot run simultaneously. Moreover, a
  * tasklet always runs on the same CPU that schedules it.
  */
-static void simrupt_tasklet_func(unsigned long __data)
+static void game_tasklet_func(unsigned long __data)
 {
     ktime_t tv_start, tv_end;
     s64 nsecs;
@@ -259,7 +259,7 @@ static void simrupt_tasklet_func(unsigned long __data)
         smp_wmb();
         queue_work(kmldrv_workqueue, &ai_two_work);
     }
-    queue_work(kmldrv_workqueue, &work);
+    queue_work(kmldrv_workqueue, &drawboard_work);
     tv_end = ktime_get();
 
     nsecs = (s64) ktime_to_ns(ktime_sub(tv_end, tv_start));
@@ -269,7 +269,7 @@ static void simrupt_tasklet_func(unsigned long __data)
 }
 
 /* Tasklet for asynchronous bottom-half processing in softirq context */
-static DECLARE_TASKLET_OLD(simrupt_tasklet, simrupt_tasklet_func);
+static DECLARE_TASKLET_OLD(game_tasklet, game_tasklet_func);
 
 static void ai_game(void)
 {
@@ -277,7 +277,7 @@ static void ai_game(void)
 
     pr_info("kmldrv: [CPU#%d] doing AI game\n", smp_processor_id());
     pr_info("kmldrv: [CPU#%d] scheduling tasklet\n", smp_processor_id());
-    tasklet_schedule(&simrupt_tasklet);
+    tasklet_schedule(&game_tasklet);
 }
 
 static void timer_handler(struct timer_list *__timer)
@@ -479,7 +479,7 @@ static void __exit kmldrv_exit(void)
     dev_t dev_id = MKDEV(major, 0);
 
     del_timer_sync(&timer);
-    tasklet_kill(&simrupt_tasklet);
+    tasklet_kill(&game_tasklet);
     flush_workqueue(kmldrv_workqueue);
     destroy_workqueue(kmldrv_workqueue);
     vfree(fast_buf.buf);

@@ -1,4 +1,5 @@
-/* simrupt: A device that simulates interrupts */
+/* kmldrv: A kernel module that performs tic-tac-toe game between machine
+ * learning algorithms */
 
 #include <linux/cdev.h>
 #include <linux/circ_buf.h>
@@ -25,9 +26,9 @@ MODULE_DESCRIPTION("A device that simulates interrupts");
 #define DECLARE_TASKLET_OLD(arg1, arg2) DECLARE_TASKLET(arg1, arg2, 0L)
 #endif
 
-#define DEV_NAME "simrupt"
+#define DEV_NAME "kmldrv"
 
-#define NR_SIMRUPT 1
+#define NR_KMLDRV 1
 
 static int delay = 100; /* time (in ms) to generate an event */
 
@@ -38,8 +39,8 @@ static struct timer_list timer;
 
 /* Character device stuff */
 static int major;
-static struct class *simrupt_class;
-static struct cdev simrupt_cdev;
+static struct class *kmldrv_class;
+static struct cdev kmldrv_cdev;
 
 static char draw_buffer[DRAWBUFFER_SIZE];
 
@@ -62,7 +63,7 @@ static void produce_board(void)
     if (unlikely(len < sizeof(draw_buffer)) && printk_ratelimit())
         pr_warn("%s: %zu bytes dropped\n", __func__, sizeof(draw_buffer) - len);
 
-    pr_debug("simrupt: %s: in %u/%u bytes\n", __func__, len,
+    pr_debug("kmldrv: %s: in %u/%u bytes\n", __func__, len,
              kfifo_len(&rx_fifo));
 }
 
@@ -131,7 +132,7 @@ static void simrupt_work_func(struct work_struct *w)
      * during the pr_info().
      */
     cpu = get_cpu();
-    pr_info("simrupt: [CPU#%d] %s\n", cpu, __func__);
+    pr_info("kmldrv: [CPU#%d] %s\n", cpu, __func__);
     put_cpu();
 
     mutex_lock(&producer_lock);
@@ -162,7 +163,7 @@ static void ai_one_work_func(struct work_struct *w)
     WARN_ON_ONCE(in_interrupt());
 
     cpu = get_cpu();
-    pr_info("simrupt: [CPU#%d] start doing %s\n", cpu, __func__);
+    pr_info("kmldrv: [CPU#%d] start doing %s\n", cpu, __func__);
     tv_start = ktime_get();
     mutex_lock(&producer_lock);
     int move;
@@ -180,7 +181,7 @@ static void ai_one_work_func(struct work_struct *w)
     tv_end = ktime_get();
 
     nsecs = (s64) ktime_to_ns(ktime_sub(tv_end, tv_start));
-    pr_info("simrupt: [CPU#%d] doing %s for %llu usec\n", cpu, __func__,
+    pr_info("kmldrv: [CPU#%d] doing %s for %llu usec\n", cpu, __func__,
             (unsigned long long) nsecs >> 10);
     put_cpu();
 }
@@ -196,7 +197,7 @@ static void ai_two_work_func(struct work_struct *w)
     WARN_ON_ONCE(in_interrupt());
 
     cpu = get_cpu();
-    pr_info("simrupt: [CPU#%d] start doing %s\n", cpu, __func__);
+    pr_info("kmldrv: [CPU#%d] start doing %s\n", cpu, __func__);
     tv_start = ktime_get();
     mutex_lock(&producer_lock);
     int move;
@@ -214,13 +215,13 @@ static void ai_two_work_func(struct work_struct *w)
     tv_end = ktime_get();
 
     nsecs = (s64) ktime_to_ns(ktime_sub(tv_end, tv_start));
-    pr_info("simrupt: [CPU#%d] end doing %s for %llu usec\n", cpu, __func__,
+    pr_info("kmldrv: [CPU#%d] end doing %s for %llu usec\n", cpu, __func__,
             (unsigned long long) nsecs >> 10);
     put_cpu();
 }
 
 /* Workqueue for asynchronous bottom-half processing */
-static struct workqueue_struct *simrupt_workqueue;
+static struct workqueue_struct *kmldrv_workqueue;
 
 /* Work item: holds a pointer to the function that is going to be executed
  * asynchronously.
@@ -252,18 +253,18 @@ static void simrupt_tasklet_func(unsigned long __data)
     if (finish && turn == 'O') {
         WRITE_ONCE(finish, 0);
         smp_wmb();
-        queue_work(simrupt_workqueue, &ai_one_work);
+        queue_work(kmldrv_workqueue, &ai_one_work);
     } else if (finish && turn == 'X') {
         WRITE_ONCE(finish, 0);
         smp_wmb();
-        queue_work(simrupt_workqueue, &ai_two_work);
+        queue_work(kmldrv_workqueue, &ai_two_work);
     }
-    queue_work(simrupt_workqueue, &work);
+    queue_work(kmldrv_workqueue, &work);
     tv_end = ktime_get();
 
     nsecs = (s64) ktime_to_ns(ktime_sub(tv_end, tv_start));
 
-    pr_info("simrupt: [CPU#%d] %s in_softirq: %llu usec\n", smp_processor_id(),
+    pr_info("kmldrv: [CPU#%d] %s in_softirq: %llu usec\n", smp_processor_id(),
             __func__, (unsigned long long) nsecs >> 10);
 }
 
@@ -274,8 +275,8 @@ static void ai_game(void)
 {
     WARN_ON_ONCE(!irqs_disabled());
 
-    pr_info("simrupt: [CPU#%d] doing AI game\n", smp_processor_id());
-    pr_info("simrupt: [CPU#%d] scheduling tasklet\n", smp_processor_id());
+    pr_info("kmldrv: [CPU#%d] doing AI game\n", smp_processor_id());
+    pr_info("kmldrv: [CPU#%d] scheduling tasklet\n", smp_processor_id());
     tasklet_schedule(&simrupt_tasklet);
 }
 
@@ -284,7 +285,7 @@ static void timer_handler(struct timer_list *__timer)
     ktime_t tv_start, tv_end;
     s64 nsecs;
 
-    pr_info("simrupt: [CPU#%d] enter %s\n", smp_processor_id(), __func__);
+    pr_info("kmldrv: [CPU#%d] enter %s\n", smp_processor_id(), __func__);
     /* We are using a kernel timer to simulate a hard-irq, so we must expect
      * to be in softirq context here.
      */
@@ -302,7 +303,7 @@ static void timer_handler(struct timer_list *__timer)
         mod_timer(&timer, jiffies + msecs_to_jiffies(delay));
     } else {
         int cpu = get_cpu();
-        pr_info("simrupt: [CPU#%d] Drawing final board\n", cpu);
+        pr_info("kmldrv: [CPU#%d] Drawing final board\n", cpu);
         put_cpu();
 
         mutex_lock(&producer_lock);
@@ -316,27 +317,27 @@ static void timer_handler(struct timer_list *__timer)
 
         wake_up_interruptible(&rx_wait);
 
-        pr_info("simrupt: %c win!!!\n", win);
+        pr_info("kmldrv: %c win!!!\n", win);
     }
     tv_end = ktime_get();
 
     nsecs = (s64) ktime_to_ns(ktime_sub(tv_end, tv_start));
 
-    pr_info("simrupt: [CPU#%d] %s in_irq: %llu usec\n", smp_processor_id(),
+    pr_info("kmldrv: [CPU#%d] %s in_irq: %llu usec\n", smp_processor_id(),
             __func__, (unsigned long long) nsecs >> 10);
 
     local_irq_enable();
 }
 
-static ssize_t simrupt_read(struct file *file,
-                            char __user *buf,
-                            size_t count,
-                            loff_t *ppos)
+static ssize_t kmldrv_read(struct file *file,
+                           char __user *buf,
+                           size_t count,
+                           loff_t *ppos)
 {
     unsigned int read;
     int ret;
 
-    pr_debug("simrupt: %s(%p, %zd, %lld)\n", __func__, buf, count, *ppos);
+    pr_debug("kmldrv: %s(%p, %zd, %lld)\n", __func__, buf, count, *ppos);
 
     if (unlikely(!access_ok(buf, count)))
         return -EFAULT;
@@ -356,7 +357,7 @@ static ssize_t simrupt_read(struct file *file,
         }
         ret = wait_event_interruptible(rx_wait, kfifo_len(&rx_fifo));
     } while (ret == 0);
-    pr_debug("simrupt: %s: out %u/%u bytes\n", __func__, read,
+    pr_debug("kmldrv: %s: out %u/%u bytes\n", __func__, read,
              kfifo_len(&rx_fifo));
 
     mutex_unlock(&read_lock);
@@ -366,9 +367,9 @@ static ssize_t simrupt_read(struct file *file,
 
 static atomic_t open_cnt;
 
-static int simrupt_open(struct inode *inode, struct file *filp)
+static int kmldrv_open(struct inode *inode, struct file *filp)
 {
-    pr_debug("simrupt: %s\n", __func__);
+    pr_debug("kmldrv: %s\n", __func__);
     if (atomic_inc_return(&open_cnt) == 1)
         mod_timer(&timer, jiffies + msecs_to_jiffies(delay));
     pr_info("openm current cnt: %d\n", atomic_read(&open_cnt));
@@ -376,12 +377,12 @@ static int simrupt_open(struct inode *inode, struct file *filp)
     return 0;
 }
 
-static int simrupt_release(struct inode *inode, struct file *filp)
+static int kmldrv_release(struct inode *inode, struct file *filp)
 {
-    pr_debug("simrupt: %s\n", __func__);
+    pr_debug("kmldrv: %s\n", __func__);
     if (atomic_dec_and_test(&open_cnt) == 0) {
         del_timer_sync(&timer);
-        flush_workqueue(simrupt_workqueue);
+        flush_workqueue(kmldrv_workqueue);
         fast_buf_clear();
     }
     pr_info("release, current cnt: %d\n", atomic_read(&open_cnt));
@@ -389,15 +390,15 @@ static int simrupt_release(struct inode *inode, struct file *filp)
     return 0;
 }
 
-static const struct file_operations simrupt_fops = {
-    .read = simrupt_read,
+static const struct file_operations kmldrv_fops = {
+    .read = kmldrv_read,
     .llseek = no_llseek,
-    .open = simrupt_open,
-    .release = simrupt_release,
+    .open = kmldrv_open,
+    .release = kmldrv_release,
     .owner = THIS_MODULE,
 };
 
-static int __init simrupt_init(void)
+static int __init kmldrv_init(void)
 {
     dev_t dev_id;
     int ret;
@@ -406,49 +407,49 @@ static int __init simrupt_init(void)
         return -ENOMEM;
 
     /* Register major/minor numbers */
-    ret = alloc_chrdev_region(&dev_id, 0, NR_SIMRUPT, DEV_NAME);
+    ret = alloc_chrdev_region(&dev_id, 0, NR_KMLDRV, DEV_NAME);
     if (ret)
         goto error_alloc;
     major = MAJOR(dev_id);
 
     /* Add the character device to the system */
-    cdev_init(&simrupt_cdev, &simrupt_fops);
-    ret = cdev_add(&simrupt_cdev, dev_id, NR_SIMRUPT);
+    cdev_init(&kmldrv_cdev, &kmldrv_fops);
+    ret = cdev_add(&kmldrv_cdev, dev_id, NR_KMLDRV);
     if (ret) {
-        kobject_put(&simrupt_cdev.kobj);
+        kobject_put(&kmldrv_cdev.kobj);
         goto error_region;
     }
 
     /* Create a class structure */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 4, 0)
-    simrupt_class = class_create(THIS_MODULE, DEV_NAME);
+    kmldrv_class = class_create(THIS_MODULE, DEV_NAME);
 #else
-    simrupt_class = class_create(DEV_NAME);
+    kmldrv_class = class_create(DEV_NAME);
 #endif
-    if (IS_ERR(simrupt_class)) {
-        printk(KERN_ERR "error creating simrupt class\n");
-        ret = PTR_ERR(simrupt_class);
+    if (IS_ERR(kmldrv_class)) {
+        printk(KERN_ERR "error creating kmldrv class\n");
+        ret = PTR_ERR(kmldrv_class);
         goto error_cdev;
     }
 
     /* Register the device with sysfs */
-    device_create(simrupt_class, NULL, MKDEV(major, 0), NULL, DEV_NAME);
+    device_create(kmldrv_class, NULL, MKDEV(major, 0), NULL, DEV_NAME);
 
     /* Allocate fast circular buffer */
     fast_buf.buf = vmalloc(PAGE_SIZE);
     if (!fast_buf.buf) {
-        device_destroy(simrupt_class, dev_id);
-        class_destroy(simrupt_class);
+        device_destroy(kmldrv_class, dev_id);
+        class_destroy(kmldrv_class);
         ret = -ENOMEM;
         goto error_cdev;
     }
 
     /* Create the workqueue */
-    simrupt_workqueue = alloc_workqueue("simruptd", WQ_UNBOUND, WQ_MAX_ACTIVE);
-    if (!simrupt_workqueue) {
+    kmldrv_workqueue = alloc_workqueue("kmldrvd", WQ_UNBOUND, WQ_MAX_ACTIVE);
+    if (!kmldrv_workqueue) {
         vfree(fast_buf.buf);
-        device_destroy(simrupt_class, dev_id);
-        class_destroy(simrupt_class);
+        device_destroy(kmldrv_class, dev_id);
+        class_destroy(kmldrv_class);
         ret = -ENOMEM;
         goto error_cdev;
     }
@@ -461,35 +462,35 @@ static int __init simrupt_init(void)
     timer_setup(&timer, timer_handler, 0);
     atomic_set(&open_cnt, 0);
 
-    pr_info("simrupt: registered new simrupt device: %d,%d\n", major, 0);
+    pr_info("kmldrv: registered new kmldrv device: %d,%d\n", major, 0);
 out:
     return ret;
 error_cdev:
-    cdev_del(&simrupt_cdev);
+    cdev_del(&kmldrv_cdev);
 error_region:
-    unregister_chrdev_region(dev_id, NR_SIMRUPT);
+    unregister_chrdev_region(dev_id, NR_KMLDRV);
 error_alloc:
     kfifo_free(&rx_fifo);
     goto out;
 }
 
-static void __exit simrupt_exit(void)
+static void __exit kmldrv_exit(void)
 {
     dev_t dev_id = MKDEV(major, 0);
 
     del_timer_sync(&timer);
     tasklet_kill(&simrupt_tasklet);
-    flush_workqueue(simrupt_workqueue);
-    destroy_workqueue(simrupt_workqueue);
+    flush_workqueue(kmldrv_workqueue);
+    destroy_workqueue(kmldrv_workqueue);
     vfree(fast_buf.buf);
-    device_destroy(simrupt_class, dev_id);
-    class_destroy(simrupt_class);
-    cdev_del(&simrupt_cdev);
-    unregister_chrdev_region(dev_id, NR_SIMRUPT);
+    device_destroy(kmldrv_class, dev_id);
+    class_destroy(kmldrv_class);
+    cdev_del(&kmldrv_cdev);
+    unregister_chrdev_region(dev_id, NR_KMLDRV);
 
     kfifo_free(&rx_fifo);
-    pr_info("simrupt: unloaded\n");
+    pr_info("kmldrv: unloaded\n");
 }
 
-module_init(simrupt_init);
-module_exit(simrupt_exit);
+module_init(kmldrv_init);
+module_exit(kmldrv_exit);

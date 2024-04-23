@@ -8,6 +8,7 @@
 #include <linux/kfifo.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/sysfs.h>
 #include <linux/version.h>
 #include <linux/workqueue.h>
 
@@ -31,6 +32,42 @@ MODULE_DESCRIPTION("A device that simulates interrupts");
 #define NR_KMLDRV 1
 
 static int delay = 100; /* time (in ms) to generate an event */
+
+/* Declare kernel module attribute for sysfs */
+
+struct kmldrv_attr {
+    char display;
+    char restart;
+    char end;
+    rwlock_t lock;
+};
+
+static struct kmldrv_attr attr_obj;
+
+static ssize_t kmldrv_state_show(struct device *dev,
+                                 struct device_attribute *attr,
+                                 char *buf)
+{
+    read_lock(&attr_obj.lock);
+    int ret = snprintf(buf, 6, "%c %c %c\n", attr_obj.display, attr_obj.restart,
+                       attr_obj.end);
+    read_unlock(&attr_obj.lock);
+    return ret;
+}
+
+static ssize_t kmldrv_state_store(struct device *dev,
+                                  struct device_attribute *attr,
+                                  const char *buf,
+                                  size_t count)
+{
+    write_lock(&attr_obj.lock);
+    sscanf(buf, "%c %c %c", &(attr_obj.display), &(attr_obj.restart),
+           &(attr_obj.end));
+    write_unlock(&attr_obj.lock);
+    return count;
+}
+
+static DEVICE_ATTR_RW(kmldrv_state);
 
 /* Data produced by the simulated device */
 
@@ -135,16 +172,21 @@ static void drawboard_work_func(struct work_struct *w)
     pr_info("kmldrv: [CPU#%d] %s\n", cpu, __func__);
     put_cpu();
 
+    read_lock(&attr_obj.lock);
+    if (attr_obj.display == '0') {
+        read_unlock(&attr_obj.lock);
+        return;
+    }
+    read_unlock(&attr_obj.lock);
+
     mutex_lock(&producer_lock);
     draw_board(table);
     mutex_unlock(&producer_lock);
 
     /* Store data to the kfifo buffer */
-    // mutex_lock(&producer_lock);
     mutex_lock(&consumer_lock);
     produce_board();
     mutex_unlock(&consumer_lock);
-    // mutex_unlock(&producer_lock);
 
     wake_up_interruptible(&rx_wait);
 }
@@ -300,24 +342,28 @@ static void timer_handler(struct timer_list *__timer)
 
     if (win == ' ') {
         ai_game();
-        mod_timer(&timer, jiffies + msecs_to_jiffies(delay));
     } else {
-        int cpu = get_cpu();
-        pr_info("kmldrv: [CPU#%d] Drawing final board\n", cpu);
-        put_cpu();
+        read_lock(&attr_obj.lock);
+        if (attr_obj.display == '1') {
+            int cpu = get_cpu();
+            pr_info("kmldrv: [CPU#%d] Drawing final board\n", cpu);
+            put_cpu();
 
-        mutex_lock(&producer_lock);
-        draw_board(table);
-        mutex_unlock(&producer_lock);
+            mutex_lock(&producer_lock);
+            draw_board(table);
+            mutex_unlock(&producer_lock);
 
-        /* Store data to the kfifo buffer */
-        mutex_lock(&consumer_lock);
-        produce_board();
-        mutex_unlock(&consumer_lock);
+            /* Store data to the kfifo buffer */
+            mutex_lock(&consumer_lock);
+            produce_board();
+            mutex_unlock(&consumer_lock);
 
-        wake_up_interruptible(&rx_wait);
+            wake_up_interruptible(&rx_wait);
+        }
+        read_unlock(&attr_obj.lock);
 
         pr_info("kmldrv: %c win!!!\n", win);
+        memset(table, ' ', N_GRIDS); /* Reset the table so the game restart */
     }
     tv_end = ktime_get();
 
@@ -325,6 +371,8 @@ static void timer_handler(struct timer_list *__timer)
 
     pr_info("kmldrv: [CPU#%d] %s in_irq: %llu usec\n", smp_processor_id(),
             __func__, (unsigned long long) nsecs >> 10);
+
+    mod_timer(&timer, jiffies + msecs_to_jiffies(delay));
 
     local_irq_enable();
 }
@@ -433,7 +481,14 @@ static int __init kmldrv_init(void)
     }
 
     /* Register the device with sysfs */
-    device_create(kmldrv_class, NULL, MKDEV(major, 0), NULL, DEV_NAME);
+    struct device *kmldrv_dev =
+        device_create(kmldrv_class, NULL, MKDEV(major, 0), NULL, DEV_NAME);
+
+    ret = device_create_file(kmldrv_dev, &dev_attr_kmldrv_state);
+    if (ret < 0) {
+        printk(KERN_ERR "failed to create sysfs file kmldrv_state\n");
+        goto error_cdev;
+    }
 
     /* Allocate fast circular buffer */
     fast_buf.buf = vmalloc(PAGE_SIZE);
@@ -458,6 +513,11 @@ static int __init kmldrv_init(void)
     memset(table, ' ', N_GRIDS);
     turn = 'O';
     finish = 1;
+
+    attr_obj.display = '1';
+    attr_obj.restart = '0';
+    attr_obj.end = '0';
+    rwlock_init(&attr_obj.lock);
     /* Setup the timer */
     timer_setup(&timer, timer_handler, 0);
     atomic_set(&open_cnt, 0);

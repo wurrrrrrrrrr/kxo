@@ -37,7 +37,7 @@ static int delay = 100; /* time (in ms) to generate an event */
 
 struct kmldrv_attr {
     char display;
-    char restart;
+    char resume;
     char end;
     rwlock_t lock;
 };
@@ -49,7 +49,7 @@ static ssize_t kmldrv_state_show(struct device *dev,
                                  char *buf)
 {
     read_lock(&attr_obj.lock);
-    int ret = snprintf(buf, 6, "%c %c %c\n", attr_obj.display, attr_obj.restart,
+    int ret = snprintf(buf, 6, "%c %c %c\n", attr_obj.display, attr_obj.resume,
                        attr_obj.end);
     read_unlock(&attr_obj.lock);
     return ret;
@@ -61,7 +61,7 @@ static ssize_t kmldrv_state_store(struct device *dev,
                                   size_t count)
 {
     write_lock(&attr_obj.lock);
-    sscanf(buf, "%c %c %c", &(attr_obj.display), &(attr_obj.restart),
+    sscanf(buf, "%c %c %c", &(attr_obj.display), &(attr_obj.resume),
            &(attr_obj.end));
     write_unlock(&attr_obj.lock);
     return count;
@@ -342,6 +342,7 @@ static void timer_handler(struct timer_list *__timer)
 
     if (win == ' ') {
         ai_game();
+        mod_timer(&timer, jiffies + msecs_to_jiffies(delay));
     } else {
         read_lock(&attr_obj.lock);
         if (attr_obj.display == '1') {
@@ -360,10 +361,16 @@ static void timer_handler(struct timer_list *__timer)
 
             wake_up_interruptible(&rx_wait);
         }
+
+        if (attr_obj.end == '0') {
+            memset(table, ' ',
+                   N_GRIDS); /* Reset the table so the game restart */
+            mod_timer(&timer, jiffies + msecs_to_jiffies(delay));
+        }
+
         read_unlock(&attr_obj.lock);
 
         pr_info("kmldrv: %c win!!!\n", win);
-        memset(table, ' ', N_GRIDS); /* Reset the table so the game restart */
     }
     tv_end = ktime_get();
 
@@ -371,8 +378,6 @@ static void timer_handler(struct timer_list *__timer)
 
     pr_info("kmldrv: [CPU#%d] %s in_irq: %llu usec\n", smp_processor_id(),
             __func__, (unsigned long long) nsecs >> 10);
-
-    mod_timer(&timer, jiffies + msecs_to_jiffies(delay));
 
     local_irq_enable();
 }
@@ -515,7 +520,7 @@ static int __init kmldrv_init(void)
     finish = 1;
 
     attr_obj.display = '1';
-    attr_obj.restart = '0';
+    attr_obj.resume = '1';
     attr_obj.end = '0';
     rwlock_init(&attr_obj.lock);
     /* Setup the timer */

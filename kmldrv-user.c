@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/select.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -51,6 +52,32 @@ static void enableRawMode(void)
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 }
 
+static bool read_attr;
+
+static void listen_keyboard_handler(void)
+{
+    int attr_fd = open(KMLDRV_DEVICE_ATTR_FILE, O_RDWR);
+    char input;
+
+    if (read(STDIN_FILENO, &input, 1) == 1) {
+        char buf[20];
+        switch (input) {
+        case 16:
+            read(attr_fd, buf, 6);
+            buf[0] = (buf[0] - '0') ? '0' : '1';
+            read_attr = !read_attr;
+            write(attr_fd, buf, 6);
+            break;
+        case 17:
+            read(attr_fd, buf, 6);
+            buf[4] = '1';
+            write(attr_fd, buf, 6);
+            break;
+        }
+    }
+    close(attr_fd);
+}
+
 int main(int argc, char *argv[])
 {
     int c;
@@ -85,33 +112,38 @@ int main(int argc, char *argv[])
     int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
     fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
 
-    FILE *device_ptr = fopen(KMLDRV_DEVICE_FILE, "r");
     char display_buf[DRAWBUFFER_SIZE];
 
-    int attr_fd = open(KMLDRV_DEVICE_ATTR_FILE, O_WRONLY);
-    char input;
-    while (fgets(display_buf, DRAWBUFFER_SIZE, device_ptr)) {
-        printf("%s", display_buf);
+    fd_set readset;
+    int device_fd = open(KMLDRV_DEVICE_FILE, O_RDONLY);
+    int max_fd = device_fd > STDIN_FILENO ? device_fd : STDIN_FILENO;
+    read_attr = true;
 
-        if (read(STDIN_FILENO, &input, 1) == 1) {
-            switch (input) {
-            case 16:
-                char buf[20];
-                read(attr_fd, buf, 5);
-                buf[0] = (buf[0] - '0') ? '0' : '1';
-                write(attr_fd, buf, 5);
-                break;
-            case 17:
-                break;
-            }
+    while (1) {
+        FD_ZERO(&readset);
+        FD_SET(STDIN_FILENO, &readset);
+        FD_SET(device_fd, &readset);
+
+        int result = select(max_fd + 1, &readset, NULL, NULL, NULL);
+        if (result < 0) {
+            printf("Error with select system call\n");
+            exit(1);
+        }
+
+        if (FD_ISSET(STDIN_FILENO, &readset)) {
+            FD_CLR(STDIN_FILENO, &readset);
+            listen_keyboard_handler();
+        } else if (read_attr && FD_ISSET(device_fd, &readset)) {
+            FD_CLR(device_fd, &readset);
+            read(device_fd, display_buf, DRAWBUFFER_SIZE);
+            printf("%s", display_buf);
         }
     }
 
     disableRawMode();
     fcntl(STDIN_FILENO, F_SETFL, flags);
 
-    fclose(device_ptr);
-    close(attr_fd);
+    close(device_fd);
 
     return 0;
 }

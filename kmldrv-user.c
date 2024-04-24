@@ -98,6 +98,7 @@ int main(int argc, char *argv[])
             printf("\t Ctrl + P - Pause to show the game\n");
             printf("\t Ctrl + C - Continue to show the game\n");
             printf("\t Ctrl + R - Restart a tic-tac-toe game\n");
+            printf("\t Ctrl + Q - Stop the tic-tac-toe game\n");
             return 0;
         default:
             printf("Invalid arguments\n");

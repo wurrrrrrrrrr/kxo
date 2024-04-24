@@ -94,10 +94,7 @@ int main(int argc, char *argv[])
             printf("\t--start - start a tic-tac-toe game\n");
             printf("\t--release - release kmldrv\n\n");
             printf("Control Options:\n\n");
-            printf("\t Ctrl + S - Start a tic-tac-toe game\n");
-            printf("\t Ctrl + P - Pause to show the game\n");
-            printf("\t Ctrl + C - Continue to show the game\n");
-            printf("\t Ctrl + R - Restart a tic-tac-toe game\n");
+            printf("\t Ctrl + P - Pause/Continue to show the game\n");
             printf("\t Ctrl + Q - Stop the tic-tac-toe game\n");
             return 0;
         default:

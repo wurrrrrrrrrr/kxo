@@ -515,6 +515,7 @@ static int __init kmldrv_init(void)
     }
 
     negamax_init();
+    mcts_init();
     memset(table, ' ', N_GRIDS);
     turn = 'O';
     finish = 1;

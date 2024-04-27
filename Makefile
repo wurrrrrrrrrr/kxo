@@ -1,5 +1,5 @@
 TARGET = kmldrv
-kmldrv-objs = simrupt.o game.o wyhash.o mcts.o negamax.o zobrist.o
+kmldrv-objs = simrupt.o game.o wyhash.o xoroshiro.o mcts.o negamax.o zobrist.o
 obj-m := $(TARGET).o
 
 ccflags-y := -std=gnu99 -Wno-declaration-after-statement

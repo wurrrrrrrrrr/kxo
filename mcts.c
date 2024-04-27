@@ -4,7 +4,8 @@
 #include "game.h"
 #include "mcts.h"
 #include "util.h"
-#include "wyhash.h"
+// #include "wyhash.h"
+#include "xoroshiro.h"
 
 struct node {
     int move;
@@ -14,6 +15,8 @@ struct node {
     struct node *parent;
     struct node *children[N_GRIDS];
 };
+
+static struct state_array xoro_obj;
 
 static struct node *new_node(int move, char player, struct node *parent)
 {
@@ -122,6 +125,7 @@ static fixed_point_t simulate(char *table, char player)
     char current_player = player;
     char temp_table[N_GRIDS];
     memcpy(temp_table, table, N_GRIDS);
+    xoro_jump(&xoro_obj);
     while (1) {
         int *moves = available_moves(temp_table);
         if (moves[0] == -1) {
@@ -131,7 +135,8 @@ static fixed_point_t simulate(char *table, char player)
         int n_moves = 0;
         while (n_moves < N_GRIDS && moves[n_moves] != -1)
             ++n_moves;
-        int move = moves[wyhash64() % n_moves];
+        // int move = moves[wyhash64() % n_moves];
+        int move = moves[xoro_next(&xoro_obj) % n_moves];
         kfree(moves);
         temp_table[move] = current_player;
         char win;
@@ -203,4 +208,9 @@ int mcts(char *table, char player)
     int best_move = best_node->move;
     free_node(root);
     return best_move;
+}
+
+void mcts_init(void)
+{
+    xoro_init(&xoro_obj);
 }

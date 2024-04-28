@@ -65,13 +65,16 @@ static void listen_keyboard_handler(void)
         case 16:
             read(attr_fd, buf, 6);
             buf[0] = (buf[0] - '0') ? '0' : '1';
-            read_attr = !read_attr;
+            read_attr ^= 1;
             write(attr_fd, buf, 6);
+            printf("Stopping to display the chess board...\n");
             break;
         case 17:
             read(attr_fd, buf, 6);
             buf[4] = '1';
+            read_attr = false;
             write(attr_fd, buf, 6);
+            printf("Stopping the kernel space tic-tac-toe game...\n");
             break;
         }
     }

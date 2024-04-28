@@ -1,3 +1,4 @@
+#include <linux/sched/loadavg.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 
@@ -5,7 +6,6 @@
 #include "mcts.h"
 #include "util.h"
 // #include "wyhash.h"
-#include "xoroshiro.h"
 
 struct node {
     int move;
@@ -16,7 +16,7 @@ struct node {
     struct node *children[N_GRIDS];
 };
 
-static struct state_array xoro_obj;
+static struct mcts_info mcts_obj;
 
 static struct node *new_node(int move, char player, struct node *parent)
 {
@@ -125,7 +125,7 @@ static fixed_point_t simulate(char *table, char player)
     char current_player = player;
     char temp_table[N_GRIDS];
     memcpy(temp_table, table, N_GRIDS);
-    xoro_jump(&xoro_obj);
+    xoro_jump(&(mcts_obj.xoro_obj));
     while (1) {
         int *moves = available_moves(temp_table);
         if (moves[0] == -1) {
@@ -136,7 +136,7 @@ static fixed_point_t simulate(char *table, char player)
         while (n_moves < N_GRIDS && moves[n_moves] != -1)
             ++n_moves;
         // int move = moves[wyhash64() % n_moves];
-        int move = moves[xoro_next(&xoro_obj) % n_moves];
+        int move = moves[xoro_next(&(mcts_obj.xoro_obj)) % n_moves];
         kfree(moves);
         temp_table[move] = current_player;
         char win;
@@ -157,7 +157,7 @@ static void backpropagate(struct node *node, fixed_point_t score)
     }
 }
 
-static void expand(struct node *node, char *table)
+static int expand(struct node *node, char *table)
 {
     int *moves = available_moves(table);
     int n_moves = 0;
@@ -167,12 +167,14 @@ static void expand(struct node *node, char *table)
         node->children[i] = new_node(moves[i], node->player ^ 'O' ^ 'X', node);
     }
     kfree(moves);
+    return n_moves;
 }
 
 int mcts(char *table, char player)
 {
     char win;
     struct node *root = new_node(-1, player, NULL);
+    mcts_obj.nr_active_nodes = 1;
     for (int i = 0; i < ITERATIONS; i++) {
         struct node *node = root;
         char temp_table[N_GRIDS];
@@ -190,7 +192,7 @@ int mcts(char *table, char player)
                 break;
             }
             if (node->children[0] == NULL)
-                expand(node, temp_table);
+                mcts_obj.nr_active_nodes += expand(node, temp_table);
             node = select_move(node);
             if (!node)
                 return -1;
@@ -210,7 +212,13 @@ int mcts(char *table, char player)
     return best_move;
 }
 
+unsigned long count_active_nodes(void)
+{
+    return mcts_obj.nr_active_nodes;
+}
+
 void mcts_init(void)
 {
-    xoro_init(&xoro_obj);
+    xoro_init(&(mcts_obj.xoro_obj));
+    mcts_obj.nr_active_nodes = 0;
 }

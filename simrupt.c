@@ -7,6 +7,7 @@
 #include <linux/interrupt.h>
 #include <linux/kfifo.h>
 #include <linux/module.h>
+#include <linux/sched/loadavg.h>
 #include <linux/slab.h>
 #include <linux/sysfs.h>
 #include <linux/version.h>
@@ -117,7 +118,7 @@ static DEFINE_MUTEX(consumer_lock);
  */
 static struct circ_buf fast_buf;
 
-
+static unsigned long mcts_avennode[3];
 static char table[N_GRIDS];
 
 /* Draw the board into draw_buffer */
@@ -189,6 +190,23 @@ static void drawboard_work_func(struct work_struct *w)
     mutex_unlock(&consumer_lock);
 
     wake_up_interruptible(&rx_wait);
+}
+
+static void mcts_calc_load(struct work_struct *w)
+{
+    unsigned long active_nodes;
+
+    active_nodes = count_active_nodes() * FIXED_1;
+    mcts_avennode[0] = calc_load(mcts_avennode[0], EXP_1, active_nodes);
+    mcts_avennode[1] = calc_load(mcts_avennode[1], EXP_5, active_nodes);
+    mcts_avennode[2] = calc_load(mcts_avennode[2], EXP_15, active_nodes);
+
+    int a = mcts_avennode[0] + (FIXED_1 / 200);
+    int b = mcts_avennode[1] + (FIXED_1 / 200);
+    int c = mcts_avennode[2] + (FIXED_1 / 200);
+
+    pr_info("kmldrv: [MCTS LoadAvg] %d.%02d %d.%02d %d.%02d\n", LOAD_INT(a),
+            LOAD_FRAC(a), LOAD_INT(b), LOAD_FRAC(b), LOAD_INT(c), LOAD_FRAC(c));
 }
 
 static char turn;
@@ -271,6 +289,7 @@ static struct workqueue_struct *kmldrv_workqueue;
 static DECLARE_WORK(drawboard_work, drawboard_work_func);
 static DECLARE_WORK(ai_one_work, ai_one_work_func);
 static DECLARE_WORK(ai_two_work, ai_two_work_func);
+static DECLARE_WORK(mcts_calc_load_work, mcts_calc_load);
 
 /* Tasklet handler.
  *
@@ -301,6 +320,7 @@ static void game_tasklet_func(unsigned long __data)
         smp_wmb();
         queue_work(kmldrv_workqueue, &ai_two_work);
     }
+    queue_work(kmldrv_workqueue, &mcts_calc_load_work);
     queue_work(kmldrv_workqueue, &drawboard_work);
     tv_end = ktime_get();
 

@@ -10,7 +10,7 @@ work and kernel concepts as following:
   - workqueue
   - kernel thread
 
-It can use different machine-learning algorithm and perform tic-tac-toe games between kernel threads. The demo video are in the linke below:
+It can use different machine-learning algorithm and perform tic-tac-toe games between kernel threads. The demo video are in the link below:
  - [Kernel space tic-tac-toe game](https://www.youtube.com/watch?v=Y_xdLrDVGzk)
 
 ## Installation & Usage

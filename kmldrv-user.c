@@ -53,6 +53,7 @@ static void enableRawMode(void)
 }
 
 static bool read_attr;
+static bool end_attr;
 
 static void listen_keyboard_handler(void)
 {
@@ -67,12 +68,14 @@ static void listen_keyboard_handler(void)
             buf[0] = (buf[0] - '0') ? '0' : '1';
             read_attr ^= 1;
             write(attr_fd, buf, 6);
-            printf("Stopping to display the chess board...\n");
+            if (!read_attr)
+                printf("Stopping to display the chess board...\n");
             break;
         case 17:
             read(attr_fd, buf, 6);
             buf[4] = '1';
             read_attr = false;
+            end_attr = true;
             write(attr_fd, buf, 6);
             printf("Stopping the kernel space tic-tac-toe game...\n");
             break;
@@ -119,8 +122,9 @@ int main(int argc, char *argv[])
     int device_fd = open(KMLDRV_DEVICE_FILE, O_RDONLY);
     int max_fd = device_fd > STDIN_FILENO ? device_fd : STDIN_FILENO;
     read_attr = true;
+    end_attr = false;
 
-    while (1) {
+    while (!end_attr) {
         FD_ZERO(&readset);
         FD_SET(STDIN_FILENO, &readset);
         FD_SET(device_fd, &readset);

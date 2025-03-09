@@ -53,7 +53,7 @@ zobrist_entry_t *zobrist_get(u64 key)
 
     zobrist_entry_t *entry = NULL;
 
-    hlist_for_each_entry (entry, &hash_table[hash_key], ht_list) {
+    hlist_for_each_entry(entry, &hash_table[hash_key], ht_list) {
         if (entry->key == key)
             return entry;
     }

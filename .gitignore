@@ -6,4 +6,4 @@
 *.order
 *.cmd
 *.symvers
-user
+xo-user

@@ -1,11 +1,9 @@
-#include <linux/sched/loadavg.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 
 #include "game.h"
 #include "mcts.h"
 #include "util.h"
-// #include "wyhash.h"
 
 struct node {
     int move;
@@ -38,7 +36,7 @@ static void free_node(struct node *node)
     kfree(node);
 }
 
-fixed_point_t fixed_sqrt(fixed_point_t x)
+static fixed_point_t fixed_sqrt(fixed_point_t x)
 {
     if (!x || x == (1U << FIXED_SCALE_BITS))
         return x;
@@ -52,7 +50,7 @@ fixed_point_t fixed_sqrt(fixed_point_t x)
     return s;
 }
 
-fixed_point_t fixed_log(fixed_point_t v)
+static fixed_point_t fixed_log(fixed_point_t v)
 {
     if (!v || v == (1U << FIXED_SCALE_BITS))
         return 0;
@@ -84,6 +82,8 @@ fixed_point_t fixed_log(fixed_point_t v)
     ans = neg ? SET_SIGN(ans) : ans;
     return ans;
 }
+
+#define EXPLORATION_FACTOR fixed_sqrt(1U << (FIXED_SCALE_BITS + 1))
 
 static inline fixed_point_t uct_score(int n_total,
                                       int n_visits,
@@ -120,7 +120,7 @@ static struct node *select_move(struct node *node)
     return best_node;
 }
 
-static fixed_point_t simulate(char *table, char player)
+static fixed_point_t simulate(const char *table, char player)
 {
     char current_player = player;
     char temp_table[N_GRIDS];
@@ -135,7 +135,6 @@ static fixed_point_t simulate(char *table, char player)
         int n_moves = 0;
         while (n_moves < N_GRIDS && moves[n_moves] != -1)
             ++n_moves;
-        // int move = moves[wyhash64() % n_moves];
         int move = moves[xoro_next(&(mcts_obj.xoro_obj)) % n_moves];
         kfree(moves);
         temp_table[move] = current_player;
@@ -157,7 +156,7 @@ static void backpropagate(struct node *node, fixed_point_t score)
     }
 }
 
-static int expand(struct node *node, char *table)
+static int expand(struct node *node, const char *table)
 {
     int *moves = available_moves(table);
     int n_moves = 0;
@@ -170,7 +169,7 @@ static int expand(struct node *node, char *table)
     return n_moves;
 }
 
-int mcts(char *table, char player)
+int mcts(const char *table, char player)
 {
     char win;
     struct node *root = new_node(-1, player, NULL);
@@ -210,11 +209,6 @@ int mcts(char *table, char player)
     int best_move = best_node->move;
     free_node(root);
     return best_move;
-}
-
-unsigned long count_active_nodes(void)
-{
-    return mcts_obj.nr_active_nodes;
 }
 
 void mcts_init(void)

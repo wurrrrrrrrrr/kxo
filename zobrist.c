@@ -1,6 +1,5 @@
 #include <linux/slab.h>
 
-#include "wyhash.h"
 #include "zobrist.h"
 
 u64 zobrist_table[N_GRIDS][2];
@@ -8,6 +7,25 @@ u64 zobrist_table[N_GRIDS][2];
 #define HASH(key) ((key) % HASH_TABLE_SIZE)
 
 static struct hlist_head *hash_table;
+
+/* See https://github.com/wangyi-fudan/wyhash
+ */
+static inline u64 wyhash64_stateless(u64 *seed)
+{
+    *seed += 0x60bee2bee120fc15;
+    u128 tmp;
+    tmp = (u128) *seed * 0xa3b195354a39b70d;
+    u64 m1 = (tmp >> 64) ^ tmp;
+    tmp = (u128) m1 * 0x1b03738712fad5c9;
+    u64 m2 = (tmp >> 64) ^ tmp;
+    return m2;
+}
+
+static u64 wyhash64(void)
+{
+    u64 seed = (u64) ktime_to_ns(ktime_get());
+    return wyhash64_stateless(&seed);
+}
 
 void zobrist_init(void)
 {
@@ -19,7 +37,7 @@ void zobrist_init(void)
     hash_table =
         kmalloc(sizeof(struct hlist_head) * HASH_TABLE_SIZE, GFP_KERNEL);
     if (!hash_table) {
-        pr_info("simrupt: Failed to allocate space for hash_table\n");
+        pr_info("kxo: Failed to allocate space for hash_table\n");
         return;
     }
     for (i = 0; i < HASH_TABLE_SIZE; i++)

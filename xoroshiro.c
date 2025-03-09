@@ -1,4 +1,3 @@
-
 #include "xoroshiro.h"
 
 static inline u64 rotl(const u64 x, int k)

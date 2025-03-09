@@ -10,25 +10,23 @@
 
 #include "game.h"
 
-#define KMLDRV_STATUS_FILE "/sys/module/kmldrv/initstate"
-#define KMLDRV_DEVICE_FILE "/dev/kmldrv"
-#define KMLDRV_DEVICE_ATTR_FILE "/sys/class/kmldrv/kmldrv/kmldrv_state"
+#define XO_STATUS_FILE "/sys/module/kxo/initstate"
+#define XO_DEVICE_FILE "/dev/kxo"
+#define XO_DEVICE_ATTR_FILE "/sys/class/kxo/kxo/kxo_state"
 
-bool kmldrv_status_check(void)
+static bool status_check(void)
 {
-    FILE *fp = fopen(KMLDRV_STATUS_FILE, "r");
+    FILE *fp = fopen(XO_STATUS_FILE, "r");
     if (!fp) {
-        printf("kmldrv status : not loaded\n");
+        printf("kxo status : not loaded\n");
         return false;
     }
 
     char read_buf[20];
     fgets(read_buf, 20, fp);
     read_buf[strcspn(read_buf, "\n")] = 0;
-    if (!strcmp("live", read_buf))
-        printf("kmldrv status : live\n");
-    else {
-        printf("kmldrv status : %s\n", read_buf);
+    if (strcmp("live", read_buf)) {
+        printf("kxo status : %s\n", read_buf);
         fclose(fp);
         return false;
     }
@@ -38,32 +36,31 @@ bool kmldrv_status_check(void)
 
 static struct termios orig_termios;
 
-static void disableRawMode(void)
+static void raw_mode_disable(void)
 {
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
 }
 
-static void enableRawMode(void)
+static void raw_mode_enable(void)
 {
     tcgetattr(STDIN_FILENO, &orig_termios);
-    atexit(disableRawMode);
+    atexit(raw_mode_disable);
     struct termios raw = orig_termios;
     raw.c_lflag &= ~(ECHO | ICANON);
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 }
 
-static bool read_attr;
-static bool end_attr;
+static bool read_attr, end_attr;
 
 static void listen_keyboard_handler(void)
 {
-    int attr_fd = open(KMLDRV_DEVICE_ATTR_FILE, O_RDWR);
+    int attr_fd = open(XO_DEVICE_ATTR_FILE, O_RDWR);
     char input;
 
     if (read(STDIN_FILENO, &input, 1) == 1) {
         char buf[20];
         switch (input) {
-        case 16:
+        case 16: /* Ctrl-P */
             read(attr_fd, buf, 6);
             buf[0] = (buf[0] - '0') ? '0' : '1';
             read_attr ^= 1;
@@ -71,7 +68,7 @@ static void listen_keyboard_handler(void)
             if (!read_attr)
                 printf("Stopping to display the chess board...\n");
             break;
-        case 17:
+        case 17: /* Ctrl-Q */
             read(attr_fd, buf, 6);
             buf[4] = '1';
             read_attr = false;
@@ -86,40 +83,17 @@ static void listen_keyboard_handler(void)
 
 int main(int argc, char *argv[])
 {
-    int c;
-
-    while ((c = getopt(argc, argv, "d:s:ch")) != -1) {
-        switch (c) {
-        case 'h':
-            printf(
-                "kmldrv-user : A userspace tool which supports interactions "
-                "with kmldrv from user-level\n");
-            printf("Usage:\n\n");
-            printf("\t./kmldrv-user [arguments]\n\n");
-            printf("Arguments:\n\n");
-            printf("\t--start - start a tic-tac-toe game\n");
-            printf("\t--release - release kmldrv\n\n");
-            printf("Control Options:\n\n");
-            printf("\t Ctrl + P - Pause/Continue to show the game\n");
-            printf("\t Ctrl + Q - Stop the tic-tac-toe game\n");
-            return 0;
-        default:
-            printf("Invalid arguments\n");
-            break;
-        }
-    }
-
-    if (!kmldrv_status_check())
+    if (!status_check())
         exit(1);
 
-    enableRawMode();
+    raw_mode_enable();
     int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
     fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
 
     char display_buf[DRAWBUFFER_SIZE];
 
     fd_set readset;
-    int device_fd = open(KMLDRV_DEVICE_FILE, O_RDONLY);
+    int device_fd = open(XO_DEVICE_FILE, O_RDONLY);
     int max_fd = device_fd > STDIN_FILENO ? device_fd : STDIN_FILENO;
     read_attr = true;
     end_attr = false;
@@ -146,7 +120,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    disableRawMode();
+    raw_mode_disable();
     fcntl(STDIN_FILENO, F_SETFL, flags);
 
     close(device_fd);

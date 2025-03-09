@@ -29,7 +29,7 @@ static char check_line_segment_win(const char *t, int i, int j, line_t line)
     return last;
 }
 
-char check_win(char *t)
+char check_win(const char *t)
 {
     for (int i_line = 0; i_line < 4; ++i_line) {
         line_t line = lines[i_line];

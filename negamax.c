@@ -16,7 +16,7 @@ static u64 hash_value;
 
 static int cmp_moves(const void *a, const void *b)
 {
-    int *_a = (int *) a, *_b = (int *) b;
+    const int *_a = (int *) a, *_b = (int *) b;
     int score_a = 0, score_b = 0;
 
     if (history_count[*_a])
@@ -32,7 +32,7 @@ static move_t negamax(char *table, int depth, char player, int alpha, int beta)
         move_t result = {get_score(table, player), -1};
         return result;
     }
-    zobrist_entry_t *entry = zobrist_get(hash_value);
+    const zobrist_entry_t *entry = zobrist_get(hash_value);
     if (entry)
         return (move_t){.score = entry->score, .move = entry->move};
 

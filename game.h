@@ -35,5 +35,5 @@ typedef unsigned fixed_point_t;
 extern const line_t lines[4];
 
 int *available_moves(const char *table);
-char check_win(char *t);
+char check_win(const char *t);
 fixed_point_t calculate_win_value(char win, char player);

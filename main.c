@@ -92,14 +92,16 @@ static DEFINE_MUTEX(read_lock);
 static DECLARE_WAIT_QUEUE_HEAD(rx_wait);
 
 /* Insert the whole chess board into the kfifo buffer */
-static void produce_board(void)
-{
-    unsigned int len = kfifo_in(&rx_fifo, draw_buffer, sizeof(draw_buffer));
-    if (unlikely(len < sizeof(draw_buffer)) && printk_ratelimit())
-        pr_warn("%s: %zu bytes dropped\n", __func__, sizeof(draw_buffer) - len);
-
-    pr_debug("kxo: %s: in %u/%u bytes\n", __func__, len, kfifo_len(&rx_fifo));
-}
+// static void produce_board(void)
+//{
+//     unsigned int len = kfifo_in(&rx_fifo, draw_buffer, sizeof(draw_buffer));
+//     if (unlikely(len < sizeof(draw_buffer)) && printk_ratelimit())
+//         pr_warn("%s: %zu bytes dropped\n", __func__, sizeof(draw_buffer) -
+//         len);
+//
+//     pr_debug("kxo: %s: in %u/%u bytes\n", __func__, len,
+//     kfifo_len(&rx_fifo));
+// }
 
 /* Mutex to serialize kfifo writers within the workqueue handler */
 static DEFINE_MUTEX(producer_lock);
@@ -154,6 +156,7 @@ static void fast_buf_clear(void)
 static void drawboard_work_func(struct work_struct *w)
 {
     int cpu;
+    unsigned int len = 0;
 
     /* This code runs from a kernel thread, so softirqs and hard-irqs must
      * be enabled.
@@ -181,7 +184,16 @@ static void drawboard_work_func(struct work_struct *w)
 
     /* Store data to the kfifo buffer */
     mutex_lock(&consumer_lock);
-    produce_board();
+    while (fast_buf.tail != fast_buf.head) {
+        char c = fast_buf.buf[fast_buf.tail];
+        fast_buf.tail = (fast_buf.tail + 1) & (PAGE_SIZE - 1);
+
+        // 存入 kfifo
+        len += kfifo_in(&rx_fifo, &c, 1);
+    }
+    if (unlikely(len < sizeof(draw_buffer)) && printk_ratelimit())
+        pr_warn("%s: %zu bytes dropped\n", __func__, sizeof(draw_buffer) - len);
+    // produce_board();
     mutex_unlock(&consumer_lock);
 
     wake_up_interruptible(&rx_wait);
@@ -359,9 +371,14 @@ static void timer_handler(struct timer_list *__timer)
             mutex_unlock(&producer_lock);
 
             /* Store data to the kfifo buffer */
-            mutex_lock(&consumer_lock);
-            produce_board();
-            mutex_unlock(&consumer_lock);
+            //            mutex_lock(&consumer_lock);
+            for (size_t i = 0; i < sizeof(draw_buffer); i++) {
+                fast_buf.buf[fast_buf.head] = draw_buffer[i];
+                fast_buf.head = (fast_buf.head + 1) & (PAGE_SIZE - 1);
+            }
+            //           produce_board();
+            queue_work(kxo_workqueue, &drawboard_work);
+            //            mutex_unlock(&consumer_lock);
 
             wake_up_interruptible(&rx_wait);
         }
@@ -506,6 +523,9 @@ static int __init kxo_init(void)
         ret = -ENOMEM;
         goto error_cdev;
     }
+
+    fast_buf.head = 0;
+    fast_buf.tail = 0;
 
     /* Create the workqueue */
     kxo_workqueue = alloc_workqueue("kxod", WQ_UNBOUND, WQ_MAX_ACTIVE);

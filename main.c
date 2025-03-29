@@ -318,6 +318,8 @@ static void ai_game(void)
     tasklet_schedule(&game_tasklet);
 }
 
+static int count = 0;
+
 static void timer_handler(struct timer_list *__timer)
 {
     ktime_t tv_start, tv_end;
@@ -334,12 +336,18 @@ static void timer_handler(struct timer_list *__timer)
 
     tv_start = ktime_get();
 
-    char win = check_win(table);
+    char win = ' ';
+
+    if (count >= 3) {
+        win = check_win(table);
+    }
 
     if (win == ' ') {
         ai_game();
+        count = count + 1;
         mod_timer(&timer, jiffies + msecs_to_jiffies(delay));
     } else {
+        count = 0;
         read_lock(&attr_obj.lock);
         if (attr_obj.display == '1') {
             int cpu = get_cpu();

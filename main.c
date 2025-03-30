@@ -9,6 +9,9 @@
 #include <linux/sysfs.h>
 #include <linux/version.h>
 #include <linux/workqueue.h>
+#if defined(CONFIG_X86)
+#include <linux/vmalloc.h>
+#endif
 
 #include "game.h"
 #include "mcts.h"

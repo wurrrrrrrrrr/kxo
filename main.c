@@ -36,10 +36,12 @@ static int delay = 100; /* time (in ms) to generate an event */
 
 /* Declare kernel module attribute for sysfs */
 
+#define FLAG_DISPLAY (1 << 0)
+#define FLAG_RESUME (1 << 1)
+#define FLAG_END (1 << 2)
+
 struct kxo_attr {
-    char display;
-    char resume;
-    char end;
+    char flags;
     rwlock_t lock;
 };
 
@@ -50,8 +52,7 @@ static ssize_t kxo_state_show(struct device *dev,
                               char *buf)
 {
     read_lock(&attr_obj.lock);
-    int ret = snprintf(buf, 6, "%c %c %c\n", attr_obj.display, attr_obj.resume,
-                       attr_obj.end);
+    int ret = snprintf(buf, 1, "%c", attr_obj.flags);
     read_unlock(&attr_obj.lock);
     return ret;
 }
@@ -62,8 +63,7 @@ static ssize_t kxo_state_store(struct device *dev,
                                size_t count)
 {
     write_lock(&attr_obj.lock);
-    sscanf(buf, "%c %c %c", &(attr_obj.display), &(attr_obj.resume),
-           &(attr_obj.end));
+    sscanf(buf, "%c", &(attr_obj.flags));
     write_unlock(&attr_obj.lock);
     return count;
 }
@@ -172,7 +172,7 @@ static void drawboard_work_func(struct work_struct *w)
     put_cpu();
 
     read_lock(&attr_obj.lock);
-    if (attr_obj.display == '0') {
+    if (!(attr_obj.flags & FLAG_DISPLAY)) {
         read_unlock(&attr_obj.lock);
         return;
     }
@@ -352,7 +352,7 @@ static void timer_handler(struct timer_list *__timer)
     } else {
         count = 0;
         read_lock(&attr_obj.lock);
-        if (attr_obj.display == '1') {
+        if (attr_obj.flags & FLAG_DISPLAY) {
             int cpu = get_cpu();
             pr_info("kxo: [CPU#%d] Drawing final board\n", cpu);
             put_cpu();
@@ -369,7 +369,7 @@ static void timer_handler(struct timer_list *__timer)
             wake_up_interruptible(&rx_wait);
         }
 
-        if (attr_obj.end == '0') {
+        if (!(attr_obj.flags & FLAG_END)) {
             memset(table, ' ',
                    N_GRIDS); /* Reset the table so the game restart */
             mod_timer(&timer, jiffies + msecs_to_jiffies(delay));
@@ -526,9 +526,8 @@ static int __init kxo_init(void)
     turn = 'O';
     finish = 1;
 
-    attr_obj.display = '1';
-    attr_obj.resume = '1';
-    attr_obj.end = '0';
+    attr_obj.flags |= FLAG_DISPLAY;
+    attr_obj.flags |= FLAG_RESUME;
     rwlock_init(&attr_obj.lock);
     /* Setup the timer */
     timer_setup(&timer, timer_handler, 0);

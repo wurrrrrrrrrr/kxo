@@ -14,6 +14,11 @@
 #define XO_DEVICE_FILE "/dev/kxo"
 #define XO_DEVICE_ATTR_FILE "/sys/class/kxo/kxo/kxo_state"
 
+#define FLAG_DISPLAY (1 << 0)
+#define FLAG_RESUME (1 << 1)
+#define FLAG_END (1 << 2)
+
+
 static bool status_check(void)
 {
     FILE *fp = fopen(XO_STATUS_FILE, "r");
@@ -58,22 +63,23 @@ static void listen_keyboard_handler(void)
     char input;
 
     if (read(STDIN_FILENO, &input, 1) == 1) {
-        char buf[20];
+        char buf[1];
         switch (input) {
         case 16: /* Ctrl-P */
-            read(attr_fd, buf, 6);
-            buf[0] = (buf[0] - '0') ? '0' : '1';
+            read(attr_fd, buf, 1);
+            buf[0] = (buf[0] ^= FLAG_DISPLAY) ? (buf[0] & ~FLAG_DISPLAY)
+                                              : (buf[0] ^ FLAG_DISPLAY);
             read_attr ^= 1;
-            write(attr_fd, buf, 6);
+            write(attr_fd, buf, 1);
             if (!read_attr)
                 printf("Stopping to display the chess board...\n");
             break;
         case 17: /* Ctrl-Q */
-            read(attr_fd, buf, 6);
-            buf[4] = '1';
+            read(attr_fd, buf, 1);
+            buf[0] = buf[0] ^ FLAG_END;
             read_attr = false;
             end_attr = true;
-            write(attr_fd, buf, 6);
+            write(attr_fd, buf, 1);
             printf("Stopping the kernel space tic-tac-toe game...\n");
             break;
         }

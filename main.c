@@ -429,6 +429,19 @@ static atomic_t open_cnt;
 static int kxo_open(struct inode *inode, struct file *filp)
 {
     pr_debug("kxo: %s\n", __func__);
+    write_lock(&attr_obj.lock);
+    if (attr_obj.flags & FLAG_END) {
+        pr_info("kxo: Restarting game\n");
+
+        attr_obj.flags &= ~FLAG_END;
+        attr_obj.flags |= FLAG_DISPLAY;
+
+        memset(table, ' ', N_GRIDS);
+        turn = 'O';
+        finish = 1;
+        count = 0;
+    }
+    write_unlock(&attr_obj.lock);
     if (atomic_inc_return(&open_cnt) == 1)
         mod_timer(&timer, jiffies + msecs_to_jiffies(delay));
     pr_info("openm current cnt: %d\n", atomic_read(&open_cnt));

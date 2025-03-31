@@ -8,10 +8,8 @@
 #include <linux/slab.h>
 #include <linux/sysfs.h>
 #include <linux/version.h>
-#include <linux/workqueue.h>
-#if defined(CONFIG_X86)
 #include <linux/vmalloc.h>
-#endif
+#include <linux/workqueue.h>
 
 #include "game.h"
 #include "mcts.h"

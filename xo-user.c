@@ -1,13 +1,14 @@
 #include <fcntl.h>
 #include <getopt.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/select.h>
 #include <termios.h>
 #include <unistd.h>
-
 #include "game.h"
 
 #define XO_STATUS_FILE "/sys/module/kxo/initstate"
@@ -18,7 +19,11 @@
 #define FLAG_RESUME (1 << 1)
 #define FLAG_END (1 << 2)
 
+typedef struct {
+    unsigned long long moves[17];
+} kxo_move_seq_t;
 
+#define MY_IOCTL_GET_DATA _IOR('m', 1, kxo_move_seq_t)
 static bool status_check(void)
 {
     FILE *fp = fopen(XO_STATUS_FILE, "r");
@@ -55,10 +60,48 @@ static void raw_mode_enable(void)
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 }
 
+void print_moves(const unsigned long long move_seq[17])
+{
+    const char *labels[16] = {"A1", "B1", "C1", "D1", "A2", "B2", "C2", "D2",
+                              "A3", "B3", "C3", "D3", "A4", "B4", "C4", "D4"};
+    unsigned long long step_move = move_seq[16];
+    uint8_t count = 15;
+    uint8_t moves[16];
+    bool first = true;
+    for (uint8_t i = 0; i < 16; i++) {
+        moves[i] = (step_move >> (i * 4)) & 0xF;
+        if ((first & moves[i]) == 0) {
+            first = false;
+            count = i - 1;
+        }
+    }
+    for (int g = 0; g < 16; g++) {
+        unsigned long long game = move_seq[g];
+        if (game == 0)
+            continue;
+        printf("Game %d: Moves: ", g);
+        first = true;
+
+        for (int i = moves[count] - 1; i >= 0; i--) {
+            uint8_t move = (game >> (i * 4)) & 0xF;
+
+            if (!first)
+                printf(" -> ");
+
+            printf("%s", labels[move]);
+            first = false;
+        }
+        count = count - 1;
+        printf("\n");
+    }
+}
+
+
 static bool read_attr, end_attr;
 
-static void listen_keyboard_handler(void)
+static void listen_keyboard_handler(int device_fd)
 {
+    kxo_move_seq_t buffer;
     int attr_fd = open(XO_DEVICE_ATTR_FILE, O_RDWR);
     char input;
 
@@ -81,6 +124,10 @@ static void listen_keyboard_handler(void)
             end_attr = true;
             write(attr_fd, buf, 1);
             printf("Stopping the kernel space tic-tac-toe game...\n");
+            if (ioctl(device_fd, MY_IOCTL_GET_DATA, &buffer) < 0) {
+                perror("ioctl");
+            }
+            print_moves(buffer.moves);
             break;
         }
     }
@@ -117,7 +164,7 @@ int main(int argc, char *argv[])
 
         if (FD_ISSET(STDIN_FILENO, &readset)) {
             FD_CLR(STDIN_FILENO, &readset);
-            listen_keyboard_handler();
+            listen_keyboard_handler(device_fd);
         } else if (read_attr && FD_ISSET(device_fd, &readset)) {
             FD_CLR(device_fd, &readset);
             printf("\033[H\033[J"); /* ASCII escape code to clear the screen */

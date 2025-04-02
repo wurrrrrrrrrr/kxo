@@ -3,6 +3,7 @@
 #include <linux/cdev.h>
 #include <linux/circ_buf.h>
 #include <linux/interrupt.h>
+#include <linux/ioctl.h>
 #include <linux/kfifo.h>
 #include <linux/module.h>
 #include <linux/slab.h>
@@ -119,6 +120,15 @@ static struct circ_buf fast_buf;
 
 static char table[N_GRIDS];
 
+static unsigned long long move_seq[17];
+static unsigned long long tmp_move = 0;
+static char tmp_move_step = 0;
+static unsigned long long move_step = 0;
+static unsigned int move_index = 0;
+
+static char flag = 0;
+static int head = -1;
+
 /* Draw the board into draw_buffer */
 static int draw_board(char *table)
 {
@@ -212,8 +222,11 @@ static void ai_one_work_func(struct work_struct *w)
 
     smp_mb();
 
-    if (move != -1)
+    if (move != -1) {
         WRITE_ONCE(table[move], 'O');
+        tmp_move = (tmp_move << 4) | (move & 0xF);
+        tmp_move_step = tmp_move_step + 1;
+    }
 
     WRITE_ONCE(turn, 'X');
     WRITE_ONCE(finish, 1);
@@ -246,8 +259,11 @@ static void ai_two_work_func(struct work_struct *w)
 
     smp_mb();
 
-    if (move != -1)
+    if (move != -1) {
         WRITE_ONCE(table[move], 'X');
+        tmp_move = (tmp_move << 4) | (move & 0xF);
+        tmp_move_step = tmp_move_step + 1;
+    }
 
     WRITE_ONCE(turn, 'O');
     WRITE_ONCE(finish, 1);
@@ -341,7 +357,7 @@ static void timer_handler(struct timer_list *__timer)
 
     char win = ' ';
 
-    if (count >= 3) {
+    if (count >= 2) {
         win = check_win(table);
     }
 
@@ -376,7 +392,16 @@ static void timer_handler(struct timer_list *__timer)
         }
 
         read_unlock(&attr_obj.lock);
+        move_seq[move_index] = tmp_move;
+        tmp_move = 0;
+        if ((move_index + 1) == 16)
+            flag = 1;
 
+        move_index = (move_index + 1) & 0xF;
+        move_step = (move_step << 4) | tmp_move_step;
+        tmp_move_step = 0;
+        if (flag)
+            head = (head + 1) & 0xF;
         pr_info("kxo: %c win!!!\n", win);
     }
     tv_end = ktime_get();
@@ -440,7 +465,15 @@ static int kxo_open(struct inode *inode, struct file *filp)
         turn = 'O';
         finish = 1;
         count = 0;
+        memset(move_seq, 0, sizeof(move_seq));
+        tmp_move = 0;
+        move_index = 0;
+        tmp_move_step = 0;
+        move_step = 0;
+        flag = 0;
+        head = -1;
     }
+
     write_unlock(&attr_obj.lock);
     if (atomic_inc_return(&open_cnt) == 1)
         mod_timer(&timer, jiffies + msecs_to_jiffies(delay));
@@ -461,12 +494,55 @@ static int kxo_release(struct inode *inode, struct file *filp)
 
     return 0;
 }
+typedef struct {
+    unsigned long long moves[17];
+} kxo_move_seq_t;
+
+#define MY_IOCTL_GET_DATA _IOR('m', 1, kxo_move_seq_t)
+
+static long my_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+    if (cmd == MY_IOCTL_GET_DATA) {
+        kxo_move_seq_t data;
+        move_seq[16] = move_step;
+
+        if (flag) {
+            unsigned long long temp[17];
+            int count = 0;
+
+            // Ensure head is in a valid range
+            for (size_t i = head; i < 16; i++) {
+                temp[count++] = move_seq[i];
+            }
+            for (size_t j = 0; j < head; j++) {
+                temp[count++] = move_seq[j];
+            }
+            temp[16] = move_step;  // Add move_step at the end
+
+            memcpy(data.moves, temp,
+                   sizeof(data.moves));  // Copy the array to data
+            if (copy_to_user((void __user *) arg, &data, sizeof(data))) {
+                return -EFAULT;
+            }
+
+        } else {
+            memcpy(data.moves, move_seq, sizeof(data.moves));
+            if (copy_to_user((void __user *) arg, &data, sizeof(data)))
+                return -EFAULT;
+        }
+        return 0;
+    }
+
+    return -EINVAL;
+}
+
 
 static const struct file_operations kxo_fops = {
     .read = kxo_read,
     .llseek = no_llseek,
     .open = kxo_open,
     .release = kxo_release,
+    .unlocked_ioctl = my_ioctl,
     .owner = THIS_MODULE,
 };
 

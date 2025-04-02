@@ -41,6 +41,11 @@ Simply run the command below after the kernel module is loaded:
 $ sudo ./xo-user
 ```
 
+To unload the kernel module, use the command:
+```
+$ sudo rmmod kxo
+```
+
 ## License
 
 `kxo` is released under the MIT license. Use of this source code is governed

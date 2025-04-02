@@ -70,7 +70,7 @@ void print_moves(const unsigned long long move_seq[17])
     bool first = true;
     for (uint8_t i = 0; i < 16; i++) {
         moves[i] = (step_move >> (i * 4)) & 0xF;
-        if ((first & moves[i]) == 0) {
+        if (first & (moves[i] == 0)) {
             first = false;
             count = i - 1;
         }

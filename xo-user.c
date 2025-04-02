@@ -59,6 +59,56 @@ static void raw_mode_enable(void)
     raw.c_lflag &= ~(ECHO | ICANON);
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 }
+static char draw_buffer[DRAWBUFFER_SIZE];
+/* Draw the board into draw_buffer */
+static int draw_board(const unsigned int *btable)
+{
+    int i = 0, k = 0;
+    draw_buffer[i++] = '\n';
+    draw_buffer[i++] = '\n';
+
+    for (int row = 0; row < BOARD_SIZE; row++) {
+        for (int col = 0; col < BOARD_SIZE; col++) {
+            int shift = ((N_GRIDS - 1 - k) * 2);
+            unsigned int bits = (*btable >> shift) & 0x3;
+            char cell;
+
+            switch (bits) {
+            case 0:
+                cell = 'O';
+                break;
+            case 1:
+                cell = 'X';
+                break;
+            case 2:
+                cell = ' ';
+                break;
+            default:
+                cell = '?';
+                break;
+            }
+
+            draw_buffer[i++] = cell;
+            if (col < BOARD_SIZE - 1)
+                draw_buffer[i++] = '|';
+
+            k++;
+        }
+
+        draw_buffer[i++] = '\n';
+
+        // 畫橫線
+        if (row < BOARD_SIZE - 1) {
+            for (int j = 0; j < (BOARD_SIZE << 1) - 1; j++) {
+                draw_buffer[i++] = '-';
+            }
+            draw_buffer[i++] = '\n';
+        }
+    }
+
+    draw_buffer[i] = '\0';  // 確保字串結尾
+    return 0;
+}
 
 void print_moves(const unsigned long long move_seq[17])
 {
@@ -70,7 +120,7 @@ void print_moves(const unsigned long long move_seq[17])
     bool first = true;
     for (uint8_t i = 0; i < 16; i++) {
         moves[i] = (step_move >> (i * 4)) & 0xF;
-        if (first & (moves[i] == 0)) {
+        if (first && (moves[i] == 0)) {
             first = false;
             count = i - 1;
         }
@@ -143,7 +193,7 @@ int main(int argc, char *argv[])
     int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
     fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
 
-    char display_buf[DRAWBUFFER_SIZE];
+    unsigned int display_buf;
 
     fd_set readset;
     int device_fd = open(XO_DEVICE_FILE, O_RDONLY);
@@ -152,6 +202,7 @@ int main(int argc, char *argv[])
     end_attr = false;
 
     while (!end_attr) {
+        display_buf = 0;
         FD_ZERO(&readset);
         FD_SET(STDIN_FILENO, &readset);
         FD_SET(device_fd, &readset);
@@ -168,8 +219,10 @@ int main(int argc, char *argv[])
         } else if (read_attr && FD_ISSET(device_fd, &readset)) {
             FD_CLR(device_fd, &readset);
             printf("\033[H\033[J"); /* ASCII escape code to clear the screen */
-            read(device_fd, display_buf, DRAWBUFFER_SIZE);
-            printf("%s", display_buf);
+            read(device_fd, &display_buf, 4);
+            draw_board(&display_buf);
+            // printf("%s", display_buf);
+            printf("%s", draw_buffer);
         }
     }
 

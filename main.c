@@ -96,8 +96,9 @@ static DECLARE_WAIT_QUEUE_HEAD(rx_wait);
 static void produce_board(void)
 {
     unsigned int len = kfifo_in(&rx_fifo, draw_buffer, sizeof(draw_buffer));
-    if (unlikely(len < sizeof(draw_buffer)) && printk_ratelimit())
-        pr_warn("%s: %zu bytes dropped\n", __func__, sizeof(draw_buffer) - len);
+    if (unlikely(len < sizeof(draw_buffer)))
+        pr_warn_ratelimited("%s: %zu bytes dropped\n", __func__,
+                            sizeof(draw_buffer) - len);
 
     pr_debug("kxo: %s: in %u/%u bytes\n", __func__, len, kfifo_len(&rx_fifo));
 }

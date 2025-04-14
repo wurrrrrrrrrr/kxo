@@ -440,11 +440,13 @@ static int kxo_release(struct inode *inode, struct file *filp)
 }
 
 static const struct file_operations kxo_fops = {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 4, 0)
+    .owner = THIS_MODULE,
+#endif
     .read = kxo_read,
     .llseek = no_llseek,
     .open = kxo_open,
     .release = kxo_release,
-    .owner = THIS_MODULE,
 };
 
 static int __init kxo_init(void)

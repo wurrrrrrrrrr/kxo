@@ -8,6 +8,7 @@
 #include <sys/ioctl.h>
 #include <sys/select.h>
 #include <termios.h>
+#include <time.h>
 #include <unistd.h>
 #include "game.h"
 
@@ -202,11 +203,17 @@ int main(int argc, char *argv[])
     read_attr = true;
     end_attr = false;
 
+    time_t current_time;
+    struct tm *time_info;
+
     while (!end_attr) {
         display_buf = 0;
         FD_ZERO(&readset);
         FD_SET(STDIN_FILENO, &readset);
         FD_SET(device_fd, &readset);
+        time(&current_time);
+        time_info = localtime(&current_time);
+
 
         int result = select(max_fd + 1, &readset, NULL, NULL, NULL);
         if (result < 0) {
@@ -223,7 +230,11 @@ int main(int argc, char *argv[])
             read(device_fd, &display_buf, 4);
             draw_board(&display_buf);
             // printf("%s", display_buf);
-            printf("%s", draw_buffer);
+            printf("%s\n", draw_buffer);
+            printf("\rCurrent time: %04d-%02d-%02d %02d:%02d:%02d \n",
+                   time_info->tm_year + 1900, time_info->tm_mon + 1,
+                   time_info->tm_mday, time_info->tm_hour, time_info->tm_min,
+                   time_info->tm_sec);
         }
     }
 

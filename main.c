@@ -490,26 +490,21 @@ static int __init kxo_init(void)
     ret = device_create_file(kxo_dev, &dev_attr_kxo_state);
     if (ret < 0) {
         printk(KERN_ERR "failed to create sysfs file kxo_state\n");
-        goto error_cdev;
+        goto error_device;
     }
 
     /* Allocate fast circular buffer */
     fast_buf.buf = vmalloc(PAGE_SIZE);
     if (!fast_buf.buf) {
-        device_destroy(kxo_class, dev_id);
-        class_destroy(kxo_class);
         ret = -ENOMEM;
-        goto error_cdev;
+        goto error_vmalloc;
     }
 
     /* Create the workqueue */
     kxo_workqueue = alloc_workqueue("kxod", WQ_UNBOUND, WQ_MAX_ACTIVE);
     if (!kxo_workqueue) {
-        vfree(fast_buf.buf);
-        device_destroy(kxo_class, dev_id);
-        class_destroy(kxo_class);
         ret = -ENOMEM;
-        goto error_cdev;
+        goto error_workqueue;
     }
 
     negamax_init();
@@ -529,6 +524,12 @@ static int __init kxo_init(void)
     pr_info("kxo: registered new kxo device: %d,%d\n", major, 0);
 out:
     return ret;
+error_workqueue:
+    vfree(fast_buf.buf);
+error_vmalloc:
+    device_destroy(kxo_class, dev_id);
+error_device:
+    class_destroy(kxo_class);
 error_cdev:
     cdev_del(&kxo_cdev);
 error_region:

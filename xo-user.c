@@ -67,7 +67,7 @@ static void listen_keyboard_handler(void)
             read_attr ^= 1;
             write(attr_fd, buf, 6);
             if (!read_attr)
-                printf("Stopping to display the chess board...\n");
+                printf("\n\nStopping to display the chess board...\n");
             break;
         case 17: /* Ctrl-Q */
             read(attr_fd, buf, 6);
@@ -75,7 +75,7 @@ static void listen_keyboard_handler(void)
             read_attr = false;
             end_attr = true;
             write(attr_fd, buf, 6);
-            printf("Stopping the kernel space tic-tac-toe game...\n");
+            printf("\n\nStopping the kernel space tic-tac-toe game...\n");
             break;
         }
     }
@@ -117,6 +117,7 @@ int main(int argc, char *argv[])
             FD_CLR(device_fd, &readset);
             printf("\033[H\033[J"); /* ASCII escape code to clear the screen */
             read(device_fd, display_buf, DRAWBUFFER_SIZE);
+            display_buf[DRAWBUFFER_SIZE - 1] = '\0';
             printf("%s", display_buf);
         }
     }

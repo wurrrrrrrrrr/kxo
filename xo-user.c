@@ -253,7 +253,7 @@ static void task_add(struct task *task)
 static void task_switch()
 {
     if (tasklist.next == &tasklist) {
-        exit(0);
+        return;
     }
 
     struct list_head *entry = tasklist.next;

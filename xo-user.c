@@ -16,6 +16,13 @@
 #include "user_mcts.h"
 #include "user_negamax.h"
 
+#ifdef USE_RL
+#include "reinforcement_learning.h"
+
+rl_agent_t agent;
+unsigned int state_num;
+#endif
+
 
 #define XO_STATUS_FILE "/sys/module/kxo/initstate"
 #define XO_DEVICE_FILE "/dev/kxo"
@@ -116,7 +123,7 @@ static int draw_board(const unsigned int *btable)
 
         draw_buffer[i++] = '\n';
 
-        if (row < BOARD_SIZE - 1) {
+        if (row < BOARD_SIZE) {
             for (int j = 0; j < (BOARD_SIZE << 1) - 1; j++) {
                 draw_buffer[i++] = '-';
             }
@@ -294,8 +301,11 @@ void task0(void)
         time_info = localtime(&current_time);
         if (setjmp(task->env) == 0) {
             int move;
+#ifdef USE_RL
+            move = play_rl(table, &agent);
+#else
             move = mcts(table, 'O');
-
+#endif
             if (move != -1) {
                 table[move] = 'O';
             }
@@ -467,8 +477,6 @@ int main(int argc, char *argv[])
     user_mode = false;
     switch_counting = false;
 
-
-
     fd_set readset;
     int device_fd = open(XO_DEVICE_FILE, O_RDONLY);
     int max_fd = device_fd > STDIN_FILENO ? device_fd : STDIN_FILENO;
@@ -519,10 +527,15 @@ int main(int argc, char *argv[])
             }
             switch_counting = true;
             user_display = true;
-
             memset(table, ' ', N_GRIDS);
-            negamax_init();
+#ifdef USE_RL
+            CALC_STATE_NUM(state_num);
+            init_rl_agent(&agent, state_num, 'O');
+            load_model(&agent, state_num, MODEL_NAME);
+#else
             mcts_init();
+#endif
+            negamax_init();
             printf("Start the user space tic-tac-toe game...\n");
             INIT_LIST_HEAD(&tasklist);
             void (*registered_task[])(void) = {task0, task2, task1, task2};

@@ -45,7 +45,6 @@ static unsigned long long user_move_step;
 static unsigned int user_move_index;
 static int user_head = -1;
 char win;
-char win_two;
 time_t current_time;
 struct tm *time_info;
 
@@ -486,8 +485,8 @@ void task3(void)
             task_add(task);
             task_switch();
         }
-        win_two = check_win(table_two);
-        if (win_two != ' ') {
+        win = check_win(table_two);
+        if (win != ' ') {
             memset(table_two, ' ', N_GRIDS);
         }
         task = cur_task;
@@ -532,8 +531,8 @@ void task4(void)
             task_add(task);
             task_switch();
         }
-        win_two = check_win(table_two);
-        if (win_two != ' ') {
+        win = check_win(table_two);
+        if (win != ' ') {
             memset(table_two, ' ', N_GRIDS);
         }
         task = cur_task;

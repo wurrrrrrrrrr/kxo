@@ -114,8 +114,6 @@ void update_ai_load_time(ai_load_t *ai, s64 nsecs);
 void update_ai_load_time(ai_load_t *ai, s64 nsecs)
 {
     unsigned long active_fp = (unsigned long) (nsecs >> 10);
-    if (active_fp > FIXED_1 * 2)
-        active_fp = FIXED_1 * 2;
 
     ai->load_avg_fp = calc_load(ai->load_avg_fp, EXP_1, active_fp);
 }

@@ -100,16 +100,6 @@ typedef struct {
 ai_load_t mcts_ai = {.active_tasks = ATOMIC_LONG_INIT(0), .load_avg_fp = 0};
 ai_load_t nega_ai = {.active_tasks = ATOMIC_LONG_INIT(0), .load_avg_fp = 0};
 
-static inline void ai_task_start(ai_load_t *ai)
-{
-    atomic_long_inc(&ai->active_tasks);
-}
-
-static inline void ai_task_end(ai_load_t *ai)
-{
-    atomic_long_dec(&ai->active_tasks);
-}
-
 void update_ai_load_time(ai_load_t *ai, s64 nsecs);
 void update_ai_load_time(ai_load_t *ai, s64 nsecs)
 {
@@ -247,7 +237,6 @@ static void ai_one_work_func(struct work_struct *w)
 
     WARN_ON_ONCE(in_softirq());
     WARN_ON_ONCE(in_interrupt());
-    ai_task_start(&mcts_ai);
 
     cpu = get_cpu();
     pr_info("kxo: [CPU#%d] start doing %s\n", cpu, __func__);
@@ -274,7 +263,6 @@ static void ai_one_work_func(struct work_struct *w)
     update_ai_load_time(&mcts_ai, nsecs);
     pr_info("kxo: [CPU#%d] %s completed in %llu usec\n", cpu, __func__,
             (unsigned long long) nsecs >> 10);
-    ai_task_end(&mcts_ai);
     put_cpu();
 }
 
@@ -287,7 +275,6 @@ static void ai_two_work_func(struct work_struct *w)
 
     WARN_ON_ONCE(in_softirq());
     WARN_ON_ONCE(in_interrupt());
-    ai_task_start(&nega_ai);
 
     cpu = get_cpu();
     pr_info("kxo: [CPU#%d] start doing %s\n", cpu, __func__);
@@ -314,7 +301,6 @@ static void ai_two_work_func(struct work_struct *w)
     update_ai_load_time(&nega_ai, nsecs);
     pr_info("kxo: [CPU#%d] %s completed in %llu usec\n", cpu, __func__,
             (unsigned long long) nsecs >> 10);
-    ai_task_end(&nega_ai);
     put_cpu();
 }
 

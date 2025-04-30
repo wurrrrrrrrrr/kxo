@@ -37,6 +37,7 @@ typedef struct {
 } kxo_move_seq_t;
 
 static char table[N_GRIDS];
+static char table_two[N_GRIDS];
 static unsigned long long user_move_seq[17];
 static unsigned long long user_tmp_move;
 static char user_tmp_move_step;
@@ -44,7 +45,7 @@ static unsigned long long user_move_step;
 static unsigned int user_move_index;
 static int user_head = -1;
 char win;
-
+char win_two;
 time_t current_time;
 struct tm *time_info;
 
@@ -86,6 +87,7 @@ static void raw_mode_enable(void)
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 }
 static char draw_buffer[DRAWBUFFER_SIZE];
+static char draw_buffer_two[DRAWBUFFER_SIZE];
 /* Draw the board into draw_buffer */
 static int draw_board(const unsigned int *btable)
 {
@@ -135,7 +137,7 @@ static int draw_board(const unsigned int *btable)
 }
 
 
-static int user_draw_board(char *table)
+static int user_draw_board(char *table, char *draw_buffer)
 {
     int i = 0, k = 0;
     draw_buffer[i++] = '\n';
@@ -156,6 +158,7 @@ static int user_draw_board(char *table)
 
     return 0;
 }
+
 
 void print_moves(const unsigned long long move_seq[17])
 {
@@ -312,14 +315,9 @@ void task0(void)
             user_tmp_move = (user_tmp_move << 4) | (move & 0xF);
             user_tmp_move_step = user_tmp_move_step + 1;
             if (user_display) {
-                user_draw_board(table);
+                user_draw_board(table, draw_buffer);
                 printf(
                     "\033[H\033[J"); /* ASCII escape code to clear the screen */
-                printf("%s\n", draw_buffer);
-                printf("\rCurrent time: %04d-%02d-%02d %02d:%02d:%02d \n",
-                       time_info->tm_year + 1900, time_info->tm_mon + 1,
-                       time_info->tm_mday, time_info->tm_hour,
-                       time_info->tm_min, time_info->tm_sec);
             }
             task_add(task);
             task_switch();
@@ -362,7 +360,7 @@ void task1(void)
         time_info = localtime(&current_time);
         if (setjmp(task->env) == 0) {
             int move;
-            move = mcts(table, 'X');
+            move = negamax_predict(table, 'X').move;
 
             if (move != -1) {
                 table[move] = 'X';
@@ -371,14 +369,9 @@ void task1(void)
             user_tmp_move_step = user_tmp_move_step + 1;
 
             if (user_display) {
-                user_draw_board(table);
+                user_draw_board(table, draw_buffer);
                 printf(
                     "\033[H\033[J"); /* ASCII escape code to clear the screen */
-                printf("%s\n", draw_buffer);
-                printf("\rCurrent time: %04d-%02d-%02d %02d:%02d:%02d \n",
-                       time_info->tm_year + 1900, time_info->tm_mon + 1,
-                       time_info->tm_mday, time_info->tm_hour,
-                       time_info->tm_min, time_info->tm_sec);
             }
             task_add(task);
             task_switch();
@@ -459,6 +452,97 @@ void task2(void)
     longjmp(sched, 1);
 }
 
+void task3(void)
+{
+    struct task *task = malloc(sizeof(struct task));
+    INIT_LIST_HEAD(&task->list);
+
+    if (setjmp(task->env) == 0) {
+        task_add(task);
+        longjmp(sched, 1);
+    }
+
+    task = cur_task;
+
+    while (user_mode) {
+        time(&current_time);
+        time_info = localtime(&current_time);
+        if (setjmp(task->env) == 0) {
+            int move;
+            move = mcts(table_two, 'O');
+
+            if (move != -1) {
+                table_two[move] = 'O';
+            }
+            if (user_display) {
+                user_draw_board(table_two, draw_buffer_two);
+                printf("%s\n", draw_buffer);
+                printf("%s\n", draw_buffer_two);
+                printf("\rCurrent time: %04d-%02d-%02d %02d:%02d:%02d \n",
+                       time_info->tm_year + 1900, time_info->tm_mon + 1,
+                       time_info->tm_mday, time_info->tm_hour,
+                       time_info->tm_min, time_info->tm_sec);
+            }
+            task_add(task);
+            task_switch();
+        }
+        win_two = check_win(table_two);
+        if (win_two != ' ') {
+            memset(table_two, ' ', N_GRIDS);
+        }
+        task = cur_task;
+    }
+
+    free(task);
+    longjmp(sched, 1);
+}
+
+void task4(void)
+{
+    struct task *task = malloc(sizeof(struct task));
+    INIT_LIST_HEAD(&task->list);
+
+    if (setjmp(task->env) == 0) {
+        task_add(task);
+        longjmp(sched, 1);
+    }
+
+    task = cur_task;
+
+    while (user_mode) {
+        time(&current_time);
+        time_info = localtime(&current_time);
+        if (setjmp(task->env) == 0) {
+            int move;
+            move = negamax_predict(table_two, 'X').move;
+
+            if (move != -1) {
+                table_two[move] = 'X';
+            }
+
+            if (user_display) {
+                user_draw_board(table_two, draw_buffer_two);
+                printf("%s\n", draw_buffer);
+                printf("%s\n", draw_buffer_two);
+                printf("\rCurrent time: %04d-%02d-%02d %02d:%02d:%02d \n",
+                       time_info->tm_year + 1900, time_info->tm_mon + 1,
+                       time_info->tm_mday, time_info->tm_hour,
+                       time_info->tm_min, time_info->tm_sec);
+            }
+            task_add(task);
+            task_switch();
+        }
+        win_two = check_win(table_two);
+        if (win_two != ' ') {
+            memset(table_two, ' ', N_GRIDS);
+        }
+        task = cur_task;
+    }
+
+    free(task);
+    longjmp(sched, 1);
+}
+
 
 
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
@@ -531,6 +615,7 @@ int main(int argc, char *argv[])
             switch_counting = true;
             user_display = true;
             memset(table, ' ', N_GRIDS);
+            memset(table_two, ' ', N_GRIDS);
 #ifdef USE_RL
             CALC_STATE_NUM(state_num);
             init_rl_agent(&agent, state_num, 'O');
@@ -541,7 +626,8 @@ int main(int argc, char *argv[])
             negamax_init();
             printf("Start the user space tic-tac-toe game...\n");
             INIT_LIST_HEAD(&tasklist);
-            void (*registered_task[])(void) = {task0, task2, task1, task2};
+            void (*registered_task[])(void) = {task0, task3, task2,
+                                               task1, task4, task2};
             tasks = registered_task;
             ntasks = ARRAY_SIZE(registered_task);
             schedule();

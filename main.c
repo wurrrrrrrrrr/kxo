@@ -4,8 +4,10 @@
 #include <linux/circ_buf.h>
 #include <linux/interrupt.h>
 #include <linux/ioctl.h>
+#include <linux/kernel.h>
 #include <linux/kfifo.h>
 #include <linux/module.h>
+#include <linux/sched/loadavg.h>
 #include <linux/slab.h>
 #include <linux/sysfs.h>
 #include <linux/version.h>
@@ -80,8 +82,16 @@ static struct class *kxo_class;
 static struct cdev kxo_cdev;
 
 static char table[N_GRIDS];
+static char ai_one_buf[32];
+static char ai_two_buf[32];
+
+unsigned long long ai_one_load_avg;
+unsigned long long ai_two_load_avg;
 
 static unsigned int btable = 0;
+
+static char turn;
+static int finish;
 
 /* Data are stored into a kfifo buffer before passing them to the userspace */
 static DECLARE_KFIFO_PTR(rx_fifo, unsigned char);
@@ -108,10 +118,22 @@ static void produce_board(void)
         }
         pr_info("%d\n", btable);
     }
+
+    snprintf(ai_one_buf, sizeof(ai_one_buf), "%llu", ai_one_load_avg);
+    snprintf(ai_two_buf, sizeof(ai_two_buf), "%llu", ai_two_load_avg);
+
     unsigned int len =
         kfifo_in(&rx_fifo, (unsigned char *) &btable, sizeof(btable));
     if (unlikely(len < sizeof(btable)) && printk_ratelimit())
         pr_warn("%s: %zu bytes dropped\n", __func__, sizeof(btable) - len);
+
+    len = kfifo_in(&rx_fifo, (unsigned char *) &ai_one_buf, sizeof(ai_one_buf));
+    if (unlikely(len < sizeof(ai_one_buf)) && printk_ratelimit())
+        pr_warn("%s: %zu bytes dropped\n", __func__, sizeof(ai_one_buf) - len);
+
+    len = kfifo_in(&rx_fifo, (unsigned char *) &ai_two_buf, sizeof(ai_two_buf));
+    if (unlikely(len < sizeof(ai_two_buf)) && printk_ratelimit())
+        pr_warn("%s: %zu bytes dropped\n", __func__, sizeof(ai_two_buf) - len);
 
     pr_debug("kxo: %s: in %u/%u bytes\n", __func__, len, kfifo_len(&rx_fifo));
 }
@@ -182,8 +204,6 @@ static void drawboard_work_func(struct work_struct *w)
     wake_up_interruptible(&rx_wait);
 }
 
-static char turn;
-static int finish;
 
 static void ai_one_work_func(struct work_struct *w)
 {
@@ -217,6 +237,7 @@ static void ai_one_work_func(struct work_struct *w)
     tv_end = ktime_get();
 
     nsecs = (s64) ktime_to_ns(ktime_sub(tv_end, tv_start));
+    ai_one_load_avg = calc_load(ai_one_load_avg, EXP_5, nsecs >> 10);
     pr_info("kxo: [CPU#%d] %s completed in %llu usec\n", cpu, __func__,
             (unsigned long long) nsecs >> 10);
     put_cpu();
@@ -254,6 +275,7 @@ static void ai_two_work_func(struct work_struct *w)
     tv_end = ktime_get();
 
     nsecs = (s64) ktime_to_ns(ktime_sub(tv_end, tv_start));
+    ai_two_load_avg = calc_load(ai_two_load_avg, EXP_5, nsecs >> 10);
     pr_info("kxo: [CPU#%d] %s completed in %llu usec\n", cpu, __func__,
             (unsigned long long) nsecs >> 10);
     put_cpu();
@@ -453,6 +475,8 @@ static int kxo_open(struct inode *inode, struct file *filp)
         move_step = 0;
         flag = 0;
         head = -1;
+        ai_one_load_avg = 0;
+        ai_two_load_avg = 0;
     }
 
     write_unlock(&attr_obj.lock);
@@ -595,6 +619,8 @@ static int __init kxo_init(void)
     memset(table, ' ', N_GRIDS);
     turn = 'O';
     finish = 1;
+    ai_one_load_avg = 0;
+    ai_two_load_avg = 0;
 
     attr_obj.flags |= FLAG_DISPLAY;
     attr_obj.flags |= FLAG_RESUME;

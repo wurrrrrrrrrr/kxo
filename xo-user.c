@@ -463,7 +463,7 @@ void task2(void)
 
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 
-
+static char load_avd[64];
 int main(int argc, char *argv[])
 {
     if (!status_check())
@@ -513,6 +513,9 @@ int main(int argc, char *argv[])
                 printf(
                     "\033[H\033[J"); /* ASCII escape code to clear the screen */
                 read(device_fd, &display_buf, 4);
+                read(device_fd, &load_avd, 64);
+                printf("MCT_load_avg %s usec\n", load_avd);
+                printf("NEGAMAX_load_avg %s usec\n", &load_avd[32]);
                 draw_board(&display_buf);
                 printf("%s\n", draw_buffer);
                 printf("\rCurrent time: %04d-%02d-%02d %02d:%02d:%02d \n",

@@ -40,6 +40,7 @@ static int delay = 100; /* time (in ms) to generate an event */
 #define FLAG_DISPLAY (1 << 0)
 #define FLAG_RESUME (1 << 1)
 #define FLAG_END (1 << 2)
+#define FRAC_BITS 11
 
 struct kxo_attr {
     char flags;
@@ -85,13 +86,45 @@ static char table[N_GRIDS];
 static char ai_one_buf[32];
 static char ai_two_buf[32];
 
-unsigned long long ai_one_load_avg;
-unsigned long long ai_two_load_avg;
 
 static unsigned int btable = 0;
 
 static char turn;
 static int finish;
+
+typedef struct {
+    atomic_long_t active_tasks;
+    unsigned long load_avg_fp;
+} ai_load_t;
+
+ai_load_t mcts_ai = {.active_tasks = ATOMIC_LONG_INIT(0), .load_avg_fp = 0};
+ai_load_t nega_ai = {.active_tasks = ATOMIC_LONG_INIT(0), .load_avg_fp = 0};
+
+static inline void ai_task_start(ai_load_t *ai)
+{
+    atomic_long_inc(&ai->active_tasks);
+}
+
+static inline void ai_task_end(ai_load_t *ai)
+{
+    atomic_long_dec(&ai->active_tasks);
+}
+
+void update_ai_load_time(ai_load_t *ai, s64 nsecs);
+void update_ai_load_time(ai_load_t *ai, s64 nsecs)
+{
+    unsigned long active_fp = (unsigned long) (nsecs >> 10);
+    if (active_fp > FIXED_1 * 2)
+        active_fp = FIXED_1 * 2;
+
+    ai->load_avg_fp = calc_load(ai->load_avg_fp, EXP_1, active_fp);
+}
+
+
+static inline int get_ai_load_percent(ai_load_t *ai)
+{
+    return (ai->load_avg_fp * 100) >> FRAC_BITS;
+}
 
 /* Data are stored into a kfifo buffer before passing them to the userspace */
 static DECLARE_KFIFO_PTR(rx_fifo, unsigned char);
@@ -119,8 +152,10 @@ static void produce_board(void)
         pr_info("%d\n", btable);
     }
 
-    snprintf(ai_one_buf, sizeof(ai_one_buf), "%llu", ai_one_load_avg);
-    snprintf(ai_two_buf, sizeof(ai_two_buf), "%llu", ai_two_load_avg);
+    snprintf(ai_one_buf, sizeof(ai_one_buf), "%d%%",
+             get_ai_load_percent(&mcts_ai));
+    snprintf(ai_two_buf, sizeof(ai_two_buf), "%d%%",
+             get_ai_load_percent(&nega_ai));
 
     unsigned int len =
         kfifo_in(&rx_fifo, (unsigned char *) &btable, sizeof(btable));
@@ -214,6 +249,7 @@ static void ai_one_work_func(struct work_struct *w)
 
     WARN_ON_ONCE(in_softirq());
     WARN_ON_ONCE(in_interrupt());
+    ai_task_start(&mcts_ai);
 
     cpu = get_cpu();
     pr_info("kxo: [CPU#%d] start doing %s\n", cpu, __func__);
@@ -237,9 +273,10 @@ static void ai_one_work_func(struct work_struct *w)
     tv_end = ktime_get();
 
     nsecs = (s64) ktime_to_ns(ktime_sub(tv_end, tv_start));
-    ai_one_load_avg = calc_load(ai_one_load_avg, EXP_5, nsecs >> 10);
+    update_ai_load_time(&mcts_ai, nsecs);
     pr_info("kxo: [CPU#%d] %s completed in %llu usec\n", cpu, __func__,
             (unsigned long long) nsecs >> 10);
+    ai_task_end(&mcts_ai);
     put_cpu();
 }
 
@@ -252,6 +289,7 @@ static void ai_two_work_func(struct work_struct *w)
 
     WARN_ON_ONCE(in_softirq());
     WARN_ON_ONCE(in_interrupt());
+    ai_task_start(&nega_ai);
 
     cpu = get_cpu();
     pr_info("kxo: [CPU#%d] start doing %s\n", cpu, __func__);
@@ -275,9 +313,10 @@ static void ai_two_work_func(struct work_struct *w)
     tv_end = ktime_get();
 
     nsecs = (s64) ktime_to_ns(ktime_sub(tv_end, tv_start));
-    ai_two_load_avg = calc_load(ai_two_load_avg, EXP_5, nsecs >> 10);
+    update_ai_load_time(&nega_ai, nsecs);
     pr_info("kxo: [CPU#%d] %s completed in %llu usec\n", cpu, __func__,
             (unsigned long long) nsecs >> 10);
+    ai_task_end(&nega_ai);
     put_cpu();
 }
 
@@ -475,8 +514,11 @@ static int kxo_open(struct inode *inode, struct file *filp)
         move_step = 0;
         flag = 0;
         head = -1;
-        ai_one_load_avg = 0;
-        ai_two_load_avg = 0;
+        atomic_long_set(&mcts_ai.active_tasks, 0);
+        mcts_ai.load_avg_fp = 0;
+
+        atomic_long_set(&nega_ai.active_tasks, 0);
+        nega_ai.load_avg_fp = 0;
     }
 
     write_unlock(&attr_obj.lock);
@@ -619,8 +661,6 @@ static int __init kxo_init(void)
     memset(table, ' ', N_GRIDS);
     turn = 'O';
     finish = 1;
-    ai_one_load_avg = 0;
-    ai_two_load_avg = 0;
 
     attr_obj.flags |= FLAG_DISPLAY;
     attr_obj.flags |= FLAG_RESUME;

@@ -215,7 +215,7 @@ static void listen_keyboard_handler(int device_fd)
             read_attr ^= 1;
             write(attr_fd, buf, 1);
             if (!read_attr)
-                printf("Stopping to display the chess board...\n");
+                printf("\n\nStopping to display the chess board...\n");
             break;
         case 17: /* Ctrl-Q */
             read(attr_fd, buf, 1);
@@ -231,6 +231,7 @@ static void listen_keyboard_handler(int device_fd)
             break;
         case 18: /* Ctrl-R */
             user_mode = true;
+
             break;
         }
     }
@@ -632,7 +633,6 @@ int main(int argc, char *argv[])
             schedule();
         }
     }
-
     raw_mode_disable();
     fcntl(STDIN_FILENO, F_SETFL, flags);
     close(device_fd);

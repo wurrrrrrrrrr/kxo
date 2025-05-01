@@ -55,6 +55,7 @@ static ssize_t kxo_state_show(struct device *dev,
 {
     read_lock(&attr_obj.lock);
     int ret = snprintf(buf, 1, "%c", attr_obj.flags);
+
     read_unlock(&attr_obj.lock);
     return ret;
 }
@@ -148,15 +149,18 @@ static void produce_board(void)
     unsigned int len =
         kfifo_in(&rx_fifo, (unsigned char *) &btable, sizeof(btable));
     if (unlikely(len < sizeof(btable)) && printk_ratelimit())
-        pr_warn("%s: %zu bytes dropped\n", __func__, sizeof(btable) - len);
+        pr_warn_ratelimited("%s: %zu bytes dropped\n", __func__,
+                            sizeof(btable) - len);
 
-    len = kfifo_in(&rx_fifo, (unsigned char *) &ai_one_buf, sizeof(ai_one_buf));
+    len = kfifo_in(&rx_fifo, ai_one_buf, sizeof(ai_one_buf));
     if (unlikely(len < sizeof(ai_one_buf)) && printk_ratelimit())
-        pr_warn("%s: %zu bytes dropped\n", __func__, sizeof(ai_one_buf) - len);
+        pr_warn_ratelimited("%s: %zu bytes dropped\n", __func__,
+                            sizeof(ai_one_buf) - len);
 
-    len = kfifo_in(&rx_fifo, (unsigned char *) &ai_two_buf, sizeof(ai_two_buf));
+    len = kfifo_in(&rx_fifo, ai_two_buf, sizeof(ai_two_buf));
     if (unlikely(len < sizeof(ai_two_buf)) && printk_ratelimit())
-        pr_warn("%s: %zu bytes dropped\n", __func__, sizeof(ai_two_buf) - len);
+        pr_warn_ratelimited("%s: %zu bytes dropped\n", __func__,
+                            sizeof(ai_two_buf) - len);
 
     pr_debug("kxo: %s: in %u/%u bytes\n", __func__, len, kfifo_len(&rx_fifo));
 }
@@ -569,6 +573,9 @@ static long my_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 
 static const struct file_operations kxo_fops = {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 4, 0)
+    .owner = THIS_MODULE,
+#endif
     .read = kxo_read,
     .llseek = no_llseek,
     .open = kxo_open,
@@ -618,26 +625,21 @@ static int __init kxo_init(void)
     ret = device_create_file(kxo_dev, &dev_attr_kxo_state);
     if (ret < 0) {
         printk(KERN_ERR "failed to create sysfs file kxo_state\n");
-        goto error_cdev;
+        goto error_device;
     }
 
     /* Allocate fast circular buffer */
     fast_buf.buf = vmalloc(PAGE_SIZE);
     if (!fast_buf.buf) {
-        device_destroy(kxo_class, dev_id);
-        class_destroy(kxo_class);
         ret = -ENOMEM;
-        goto error_cdev;
+        goto error_vmalloc;
     }
 
     /* Create the workqueue */
     kxo_workqueue = alloc_workqueue("kxod", WQ_UNBOUND, WQ_MAX_ACTIVE);
     if (!kxo_workqueue) {
-        vfree(fast_buf.buf);
-        device_destroy(kxo_class, dev_id);
-        class_destroy(kxo_class);
         ret = -ENOMEM;
-        goto error_cdev;
+        goto error_workqueue;
     }
 
     negamax_init();
@@ -656,6 +658,12 @@ static int __init kxo_init(void)
     pr_info("kxo: registered new kxo device: %d,%d\n", major, 0);
 out:
     return ret;
+error_workqueue:
+    vfree(fast_buf.buf);
+error_vmalloc:
+    device_destroy(kxo_class, dev_id);
+error_device:
+    class_destroy(kxo_class);
 error_cdev:
     cdev_del(&kxo_cdev);
 error_region:
